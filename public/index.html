@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Myntra Scraper Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #ff3f6c;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #ff527b;
+        }
+        #loading {
+            display: none;
+            margin-top: 20px;
+        }
+        #result {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            padding: 15px;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
+            display: none;
+        }
+        .image-preview {
+            display: flex;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .image-preview img {
+            max-width: 100px;
+            margin: 5px;
+            border: 1px solid #ddd;
+        }
+        .tab-container {
+            margin-top: 20px;
+        }
+        .tab-buttons {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        .tab-button {
+            padding: 10px 15px;
+            background-color: #f0f0f0;
+            border: none;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        .tab-button.active {
+            background-color: #ff3f6c;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+            padding: 15px;
+            border: 1px solid #ddd;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .csv-info {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #555;
+        }
+        #csv-progress {
+            margin-top: 15px;
+            display: none;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .progress-bar {
+            height: 20px;
+            background-color: #ff3f6c;
+            width: 0%;
+            border-radius: 5px;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+        }
+        #csv-results {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Myntra Product Scraper</h1>
+    
+    <div class="tab-container">
+        <div class="tab-buttons">
+            <button class="tab-button active" data-tab="single-product">Single Product</button>
+            <button class="tab-button" data-tab="csv-upload">CSV Upload</button>
+        </div>
+        
+        <div id="single-product" class="tab-content active">
+            <div class="form-group">
+                <label for="url">Product URL:</label>
+                <input type="text" id="url" placeholder="Enter Myntra product URL..." 
+                       value="https://www.myntra.com/shirts/roadster/roadster-men-pure-cotton-sustainable-casual-shirt/2127876/buy">
+            </div>
+            <button id="scrapeBtn">Scrape Product</button>
+            
+            <div id="loading">Scraping product data... This may take up to 30 seconds.</div>
+            <div id="result"></div>
+        </div>
+        
+        <div id="csv-upload" class="tab-content">
+            <div class="form-group">
+                <label for="csvFile">Upload CSV File with Product IDs:</label>
+                <input type="file" id="csvFile" accept=".csv">
+                <div class="csv-info">
+                    <p>CSV should contain a column named 'style_id' or 'product_id' with Myntra product IDs.</p>
+                    <p>Example: style_id,name<br>2127876,Product Name</p>
+                </div>
+            </div>
+            <button id="uploadBtn">Upload and Scrape</button>
+            
+            <div id="csv-progress">
+                <p>Processing products: <span id="processed-count">0</span>/<span id="total-count">0</span></p>
+                <div class="progress-container">
+                    <div id="progress-bar" class="progress-bar">0%</div>
+                </div>
+            </div>
+            
+            <div id="csv-results"></div>
+        </div>
+    </div>
+
+    <script>
+        const scrapeBtn = document.getElementById('scrapeBtn');
+        const urlInput = document.getElementById('url');
+        const loading = document.getElementById('loading');
+        const result = document.getElementById('result');
+
+        scrapeBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            
+            if (!url) {
+                alert('Please enter a Myntra product URL');
+                return;
+            }
+            
+            if (!url.includes('myntra.com')) {
+                alert('Please enter a valid Myntra URL');
+                return;
+            }
+            
+            // Show loading
+            loading.style.display = 'block';
+            result.style.display = 'none';
+            
+            try {
+                // Use fetch POST instead of GET for complex URLs
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url })
+                });
+                
+                // Additional debugging
+                console.log('Response status:', response.status);
+                
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                // Display result
+                loading.style.display = 'none';
+                result.style.display = 'block';
+                
+                if (data.success) {
+                    // Format the data nicely (keep your existing code here)
+                    let html = `<h2>${data.data.title || 'Product Title'}</h2>`;
+                    // ... rest of your HTML formatting logic
+                    result.innerHTML = html;
+                } else {
+                    result.innerHTML = `<h2>Error</h2>
+                                      <p>${data.error || 'Unknown error'}</p>
+                                      <p>${data.details || ''}</p>`;
+                }
+            } catch (error) {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+                result.innerHTML = `<h2>Error</h2>
+                                  <p>Failed to communicate with the server</p>
+                                  <p>${error.message}</p>`;
+                console.error('Error:', error);
+            }
+        });
+
+        // Tab switching functionality
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                // Remove active class from all buttons and contents
+                document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                // Add active class to clicked button and corresponding content
+                button.classList.add('active');
+                document.getElementById(button.dataset.tab).classList.add('active');
+            });
+        });
+        
+        // CSV upload functionality
+        document.getElementById('uploadBtn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a CSV file to upload');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('csvFile', file);
+            
+            const csvProgress = document.getElementById('csv-progress');
+            const csvResults = document.getElementById('csv-results');
+            const progressBar = document.getElementById('progress-bar');
+            const processedCount = document.getElementById('processed-count');
+            const totalCount = document.getElementById('total-count');
+            
+            csvProgress.style.display = 'block';
+            csvResults.innerHTML = '<p>Processing your CSV file, please wait...</p>';
+            
+            try {
+                const response = await fetch('/api/upload-csv', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    let resultsHtml = `
+                        <h3>CSV Processing Complete</h3>
+                        <p>Total Products: ${data.totalProducts}</p>
+                        <p>Successfully Scraped: ${data.successfulScrapes}</p>
+                        <p>Failed: ${data.failedScrapes}</p>
+                        <h4>Results:</h4>
+                    `;
+                    
+                    data.results.forEach(product => {
+                      if (product.error) {
+                        resultsHtml += `
+                          <div class="error-item">
+                            <p>Product ID: ${product.productId}</p>
+                            <p>Error: ${product.error}</p>
+                            <p>Details: ${product.details || 'No details available'}</p>
+                          </div>
+                          <hr>
+                        `;
+                      } else {
+                        resultsHtml += `
+                          <div class="result-item">
+                            <h3>${product.title || 'Unknown Product'}</h3>
+                            <p>ID: ${product.productId}</p>
+                            <p>Brand: ${product.brand || 'N/A'}</p>
+                            <p>Price: ${product.price || 'N/A'}</p>
+                          </div>
+                          <hr>
+                        `;
+                      }
+                    });
+                    
+                    if (data.errors.length > 0) {
+                        resultsHtml += `<h4>Errors:</h4>`;
+                        data.errors.forEach(error => {
+                            resultsHtml += `
+                                <div class="error-item">
+                                    <p>Product ID: ${error.productId}</p>
+                                    <p>Error: ${error.error}</p>
+                                    <p>Details: ${error.details || 'No details available'}</p>
+                                </div>
+                                <hr>
+                            `;
+                        });
+                    }
+                    
+                    csvResults.innerHTML = resultsHtml;
+                    progressBar.style.width = '100%';
+                    progressBar.textContent = '100%';
+                    processedCount.textContent = data.totalProducts;
+                    totalCount.textContent = data.totalProducts;
+                } else {
+                    csvResults.innerHTML = `<p>Error: ${data.error}</p><p>${data.details || ''}</p>`;
+                    csvProgress.style.display = 'none';
+                }
+            } catch (error) {
+                csvResults.innerHTML = `<p>Error: Failed to process CSV file</p><p>${error.message}</p>`;
+                csvProgress.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
