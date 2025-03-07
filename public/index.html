@@ -298,6 +298,175 @@
         .edit-alert {
             background-color: #4caf50;
         }
+
+        /* Improved progress bar */
+        .progress-container {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 8px;
+            margin-top: 15px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .progress-bar {
+            height: 24px;
+            background: linear-gradient(90deg, #ff3f6c, #ff527b);
+            width: 0%;
+            border-radius: 8px;
+            text-align: center;
+            line-height: 24px;
+            color: white;
+            font-weight: bold;
+            transition: width 0.5s ease;
+            box-shadow: 0 1px 5px rgba(255,63,108,0.3);
+        }
+        
+        /* Improved result cards */
+        .results-summary {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+        
+        .stats-container {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        
+        .stat-box {
+            flex: 1;
+            text-align: center;
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 0 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        
+        .stat-box.success {
+            background-color: #e8f5e9;
+        }
+        
+        .stat-box.failed {
+            background-color: #ffebee;
+        }
+        
+        .stat-number {
+            display: block;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .result-card {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .result-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .result-card.error {
+            border-left: 4px solid #ff5252;
+        }
+        
+        .result-card.success {
+            border-left: 4px solid #4caf50;
+        }
+        
+        .card-header {
+            padding: 12px 15px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h3 {
+            margin: 0;
+            font-size: 16px;
+            max-width: 70%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .product-id {
+            font-size: 12px;
+            color: #666;
+            background-color: #f0f0f0;
+            padding: 3px 8px;
+            border-radius: 12px;
+        }
+        
+        .error-badge {
+            background-color: #ff5252;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .card-content {
+            padding: 15px;
+        }
+        
+        .card-content p {
+            margin: 8px 0;
+        }
+        
+        .error-message {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        
+        .error-details {
+            color: #666;
+            font-size: 14px;
+            font-style: italic;
+        }
+        
+        /* Error container */
+        .error-container {
+            background-color: #ffebee;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .error-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        /* Animation for loading state */
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        
+        #csv-progress {
+            animation: pulse 1.5s infinite;
+        }
     </style>
 </head>
 <body>
@@ -579,80 +748,180 @@
             const processedCount = document.getElementById('processed-count');
             const totalCount = document.getElementById('total-count');
             
+            // Reset progress bar and show it
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
             csvProgress.style.display = 'block';
             csvResults.innerHTML = '<p>Processing your CSV file, please wait...</p>';
             
             try {
+                // Start with an animated progress to indicate activity
+                let fakeProgress = 0;
+                const progressInterval = setInterval(() => {
+                    // Progress up to 90% only (leave the last 10% for actual completion)
+                    fakeProgress += Math.random() * 3;
+                    if (fakeProgress > 90) fakeProgress = 90;
+                    
+                    // Apply smooth transition to progress bar
+                    progressBar.style.transition = 'width 0.5s ease';
+                    progressBar.style.width = `${fakeProgress}%`;
+                    progressBar.textContent = `${Math.floor(fakeProgress)}%`;
+                }, 300);
+                
                 const response = await fetch('/api/upload-csv', {
                     method: 'POST',
                     body: formData
                 });
                 
+                // Clear the fake progress animation
+                clearInterval(progressInterval);
+                
                 const data = await response.json();
                 
+                // Smoothly complete the progress bar
+                progressBar.style.transition = 'width 0.8s ease-out';
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                
                 if (data.success) {
-                    let resultsHtml = `
-                        <h3>CSV Processing Complete</h3>
-                        <p>Total Products: ${data.totalProducts}</p>
-                        <p>Successfully Scraped: ${data.successfulScrapes}</p>
-                        <p>Failed: ${data.failedScrapes}</p>
-                        <h4>Results:</h4>
-                    `;
-                    
-                    data.results.forEach(product => {
-                      if (product.error) {
-                        resultsHtml += `
-                          <div class="error-item">
-                            <p>Product ID: ${product.productId}</p>
-                            <p>Error: ${product.error}</p>
-                            <p>Details: ${product.details || 'No details available'}</p>
-                          </div>
-                          <hr>
-                        `;
-                      } else {
-                        let availabilityClass = product.availability === 'in_stock' ? 'in-stock' : 'out-of-stock';
-                        let availabilityText = product.availability === 'in_stock' ? 'In Stock' : 'Out of Stock';
-                        
-                        resultsHtml += `
-                          <div class="result-item">
-                            <h3>${product.title || 'Unknown Product'}</h3>
-                            <p>ID: ${product.productId}</p>
-                            <p>Brand: ${product.brand || 'N/A'}</p>
-                            <p>Price: ₹${product.price || 'N/A'}</p>
-                            <p>Availability: <span class="${availabilityClass}">${availabilityText}</span></p>
-                            ${product.availableSizes ? 
-                              `<p>Sizes: ${product.availableSizes.join(', ')}</p>` : ''}
-                          </div>
-                          <hr>
-                        `;
-                      }
-                    });
-                    
-                    if (data.errors.length > 0) {
-                        resultsHtml += `<h4>Errors:</h4>`;
-                        data.errors.forEach(error => {
-                            resultsHtml += `
-                                <div class="error-item">
-                                    <p>Product ID: ${error.productId}</p>
-                                    <p>Error: ${error.error}</p>
-                                    <p>Details: ${error.details || 'No details available'}</p>
-                                </div>
-                                <hr>
-                            `;
-                        });
-                    }
-                    
-                    csvResults.innerHTML = resultsHtml;
-                    progressBar.style.width = '100%';
-                    progressBar.textContent = '100%';
                     processedCount.textContent = data.totalProducts;
                     totalCount.textContent = data.totalProducts;
+                    
+                    // Fade in the results after a slight delay for smoother UX
+                    setTimeout(() => {
+                        let resultsHtml = `
+                            <div class="results-summary" style="opacity: 0; transition: opacity 0.5s ease;">
+                                <h3>CSV Processing Complete</h3>
+                                <div class="stats-container">
+                                    <div class="stat-box">
+                                        <span class="stat-number">${data.totalProducts}</span>
+                                        <span class="stat-label">Total Products</span>
+                                    </div>
+                                    <div class="stat-box success">
+                                        <span class="stat-number">${data.successfulScrapes}</span>
+                                        <span class="stat-label">Successful</span>
+                                    </div>
+                                    <div class="stat-box failed">
+                                        <span class="stat-number">${data.failedScrapes}</span>
+                                        <span class="stat-label">Failed</span>
+                                    </div>
+                                </div>
+                                <h4>Results:</h4>
+                            </div>
+                            <div class="results-items" style="opacity: 0; transition: opacity 0.5s ease;">
+                        `;
+                        
+                        data.results.forEach(product => {
+                          if (product.error) {
+                            resultsHtml += `
+                              <div class="result-card error">
+                                <div class="card-header">
+                                    <span class="product-id">ID: ${product.productId}</span>
+                                    <span class="error-badge">Error</span>
+                                </div>
+                                <div class="card-content">
+                                    <p class="error-message">${product.error}</p>
+                                    <p class="error-details">${product.details || 'No details available'}</p>
+                                </div>
+                              </div>
+                            `;
+                          } else {
+                            let availabilityClass = product.availability === 'in_stock' ? 'in-stock' : 'out-of-stock';
+                            let availabilityText = product.availability === 'in_stock' ? 'In Stock' : 'Out of Stock';
+                            
+                            resultsHtml += `
+                              <div class="result-card success">
+                                <div class="card-header">
+                                    <h3>${product.title || 'Unknown Product'}</h3>
+                                    <span class="product-id">ID: ${product.productId}</span>
+                                </div>
+                                <div class="card-content">
+                                    <p><strong>Brand:</strong> ${product.brand || 'N/A'}</p>
+                                    <p><strong>Price:</strong> ₹${product.price || 'N/A'}</p>
+                                    <p><strong>Availability:</strong> <span class="${availabilityClass}">${availabilityText}</span></p>
+                                    ${product.availableSizes ? 
+                                      `<p><strong>Sizes:</strong> ${product.availableSizes.join(', ')}</p>` : ''}
+                                </div>
+                              </div>
+                            `;
+                          }
+                        });
+                        
+                        resultsHtml += `</div>`;
+                        
+                        if (data.errors && data.errors.length > 0) {
+                            resultsHtml += `
+                                <div class="errors-section" style="opacity: 0; transition: opacity 0.5s ease;">
+                                    <h4>Errors:</h4>
+                                    <div class="errors-container">
+                            `;
+                            
+                            data.errors.forEach(error => {
+                                resultsHtml += `
+                                    <div class="result-card error">
+                                        <div class="card-header">
+                                            <span class="product-id">ID: ${error.productId}</span>
+                                            <span class="error-badge">Error</span>
+                                        </div>
+                                        <div class="card-content">
+                                            <p class="error-message">${error.error}</p>
+                                            <p class="error-details">${error.details || 'No details available'}</p>
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                            
+                            resultsHtml += `</div></div>`;
+                        }
+                        
+                        csvResults.innerHTML = resultsHtml;
+                        
+                        // Trigger reflow for animations to work
+                        setTimeout(() => {
+                            document.querySelector('.results-summary').style.opacity = '1';
+                            document.querySelector('.results-items').style.opacity = '1';
+                            if (data.errors && data.errors.length > 0) {
+                                document.querySelector('.errors-section').style.opacity = '1';
+                            }
+                        }, 100);
+                        
+                    }, 500); // Delay showing results for smooth transition
+                    
                 } else {
-                    csvResults.innerHTML = `<p>Error: ${data.error}</p><p>${data.details || ''}</p>`;
+                    // Animate the error message appearance
+                    csvResults.innerHTML = `
+                        <div class="error-container" style="opacity: 0; transition: opacity 0.5s ease;">
+                            <div class="error-icon">❌</div>
+                            <h3>Error Processing CSV</h3>
+                            <p>${data.error || 'Unknown error occurred'}</p>
+                            <p>${data.details || ''}</p>
+                        </div>
+                    `;
+                    
+                    setTimeout(() => {
+                        document.querySelector('.error-container').style.opacity = '1';
+                    }, 100);
+                    
                     csvProgress.style.display = 'none';
                 }
             } catch (error) {
-                csvResults.innerHTML = `<p>Error: Failed to process CSV file</p><p>${error.message}</p>`;
+                // Clear any progress animation
+                clearInterval(progressInterval);
+                
+                // Show error with animation
+                csvResults.innerHTML = `
+                    <div class="error-container" style="opacity: 0; transition: opacity 0.5s ease;">
+                        <div class="error-icon">❌</div>
+                        <h3>Error Processing CSV</h3>
+                        <p>Failed to process CSV file</p>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                
+                setTimeout(() => {
+                    document.querySelector('.error-container').style.opacity = '1';
+                }, 100);
+                
                 csvProgress.style.display = 'none';
             }
         });
@@ -1139,6 +1408,190 @@
                 console.error('Error:', error);
             }
         });
+
+        // Add this to your existing JavaScript section in public/index.html
+        // User state management functions
+        const userStateManager = {
+          // Generate a unique user ID or use from localStorage
+          getUserId: function() {
+            let userId = localStorage.getItem('myntra_scraper_user_id');
+            if (!userId) {
+              userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
+              localStorage.setItem('myntra_scraper_user_id', userId);
+            }
+            return userId;
+          },
+          
+          // Save state to localStorage and sync with server
+          saveState: async function(stateData) {
+            const userId = this.getUserId();
+            
+            // Save to localStorage first (for offline access)
+            localStorage.setItem('myntra_scraper_state', JSON.stringify({
+              lastUpdated: Date.now(),
+              data: stateData
+            }));
+            
+            // Then try to sync with server
+            try {
+              const response = await fetch('/api/sync-user-state', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  userId: userId,
+                  stateData: stateData
+                })
+              });
+              
+              const result = await response.json();
+              console.log('State sync result:', result);
+              return result.success;
+            } catch (error) {
+              console.error('Failed to sync state with server:', error);
+              return false;
+            }
+          },
+          
+          // Load state from localStorage or server
+          loadState: async function() {
+            const userId = this.getUserId();
+            let stateData = {};
+            
+            // Try to get from localStorage first
+            const localState = localStorage.getItem('myntra_scraper_state');
+            if (localState) {
+              stateData = JSON.parse(localState);
+            }
+            
+            // Try to get from server (might have newer data)
+            try {
+              const response = await fetch(`/api/user-state/${userId}`);
+              const serverData = await response.json();
+              
+              // Use server data if it's newer than local data
+              if (serverData.success && 
+                  serverData.state.lastUpdated > (stateData.lastUpdated || 0)) {
+                stateData = serverData.state;
+                // Update localStorage with newer server data
+                localStorage.setItem('myntra_scraper_state', JSON.stringify(stateData));
+              }
+              
+              return stateData.data || {};
+            } catch (error) {
+              console.error('Failed to load state from server:', error);
+              // Fall back to local data if server request fails
+              return stateData.data || {};
+            }
+          },
+          
+          // Clear user state
+          clearState: async function() {
+            const userId = this.getUserId();
+            localStorage.removeItem('myntra_scraper_state');
+            
+            try {
+              // Reset server state as well
+              await fetch('/api/sync-user-state', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  userId: userId,
+                  stateData: {}
+                })
+              });
+            } catch (error) {
+              console.error('Failed to clear server state:', error);
+            }
+          }
+        };
+
+        // Example usage:
+        // Initialize the page with saved state
+        document.addEventListener('DOMContentLoaded', async function() {
+          try {
+            // Load saved state
+            const savedState = await userStateManager.loadState();
+            console.log('Loaded saved state:', savedState);
+            
+            // Apply saved settings to UI
+            if (savedState.previousSearches) {
+              // Implement code to show previous searches in UI
+            }
+            
+            if (savedState.priceAlerts) {
+              // Implement code to restore price alerts
+            }
+            
+            if (savedState.theme) {
+              // Apply saved theme preferences
+              document.body.classList.toggle('dark-mode', savedState.theme === 'dark');
+            }
+          } catch (error) {
+            console.error('Error initializing state:', error);
+          }
+        });
+
+        // Example to save state when user makes changes
+        function updateUserState() {
+          // Collect current state from UI
+          const currentState = {
+            previousSearches: [], // Get from UI
+            priceAlerts: [], // Get from UI
+            theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
+            // Add any other state you want to preserve
+            lastVisitedProductIds: []
+          };
+          
+          // Save to local storage and server
+          userStateManager.saveState(currentState)
+            .then(success => {
+              console.log('State saved:', success);
+            })
+            .catch(error => {
+              console.error('Error saving state:', error);
+            });
+        }
+
+        // Add this to relevant event listeners, for example:
+        document.getElementById('scrapeBtn').addEventListener('click', function() {
+          // Existing code...
+          
+          // After successful scrape, update the user's previous searches
+          const url = urlInput.value.trim();
+          updateStateWithNewSearch(url);
+        });
+
+        // Function to update state with new search
+        function updateStateWithNewSearch(url) {
+          userStateManager.loadState()
+            .then(currentState => {
+              // Initialize previousSearches if it doesn't exist
+              if (!currentState.previousSearches) {
+                currentState.previousSearches = [];
+              }
+              
+              // Add new search to the beginning
+              currentState.previousSearches.unshift({
+                url: url,
+                timestamp: Date.now()
+              });
+              
+              // Keep only last 10 searches
+              if (currentState.previousSearches.length > 10) {
+                currentState.previousSearches = currentState.previousSearches.slice(0, 10);
+              }
+              
+              // Save updated state
+              return userStateManager.saveState(currentState);
+            })
+            .catch(error => {
+              console.error('Error updating state with new search:', error);
+            });
+        }
     </script>
 </body>
 </html>

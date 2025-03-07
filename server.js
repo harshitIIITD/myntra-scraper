@@ -363,6 +363,79 @@ app.get('/api/regenerate-products-json', async (req, res) => {
   }
 });
 
+// Add this route to handle user state synchronization
+app.post('/api/sync-user-state', express.json(), async (req, res) => {
+  try {
+    const { userId, stateData } = req.body;
+    
+    if (!userId || !stateData) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and state data are required'
+      });
+    }
+    
+    // Ensure user-state directory exists
+    const userStateDir = path.join(__dirname, 'user-state');
+    if (!fs.existsSync(userStateDir)) {
+      fs.mkdirSync(userStateDir);
+    }
+    
+    // Path to user state file
+    const userStatePath = path.join(userStateDir, `${userId}.json`);
+    
+    // Save the user state
+    fs.writeFileSync(userStatePath, JSON.stringify({
+      lastUpdated: Date.now(),
+      data: stateData
+    }));
+    
+    res.json({
+      success: true,
+      message: 'User state saved successfully'
+    });
+  } catch (error) {
+    console.error('Error saving user state:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save user state',
+      details: error.message
+    });
+  }
+});
+
+// Add this route to retrieve user state
+app.get('/api/user-state/:userId', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const userStatePath = path.join(__dirname, 'user-state', `${userId}.json`);
+    
+    if (fs.existsSync(userStatePath)) {
+      const userData = JSON.parse(fs.readFileSync(userStatePath, 'utf8'));
+      res.json({
+        success: true,
+        state: userData
+      });
+    } else {
+      // If no state exists yet, return empty state
+      res.json({
+        success: true,
+        state: {
+          lastUpdated: Date.now(),
+          data: {}
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error retrieving user state:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve user state',
+      details: error.message
+    });
+  }
+});
+
 // Add this route for CSV download
 app.get('/api/download-products-csv', async (req, res) => {
   try {
