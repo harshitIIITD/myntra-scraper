@@ -1,6 +1,11 @@
 const express = require('express');
 const cors = require('cors');
-const { scrapeMyntraProduct, regenerateCombinedJSON } = require('./scraper');
+const { 
+  scrapeMyntraProduct, 
+  scrapeAmazonProduct, 
+  scrapeFlipkartProduct, 
+  regenerateCombinedJSON 
+} = require('./scraper');
 // Add these imports at the top with your other requires
 const multer = require('multer');
 const csv = require('csv-parser');
@@ -78,9 +83,9 @@ app.get('/api/scrape', async (req, res) => {
   }
 });
 
-// POST API endpoint for scraping (more reliable for complex URLs)
+// Update the POST API endpoint for scraping
 app.post('/api/scrape', async (req, res) => {
-  const { url } = req.body;
+  const { url, website = 'myntra' } = req.body;
   
   if (!url) {
     return res.status(400).json({ 
@@ -90,42 +95,70 @@ app.post('/api/scrape', async (req, res) => {
   }
 
   try {
-    console.log(`Received POST request to scrape: ${url}`);
+    console.log(`Received POST request to scrape ${website} URL: ${url}`);
     
     // Add timeout to see if request is hanging
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Request timeout after 60s')), 60000)
     );
     
+    // Choose the appropriate scraping function based on website
+    let scrapingFunction;
+    switch (website) {
+      case 'amazon':
+        scrapingFunction = scrapeAmazonProduct;
+        break;
+      case 'flipkart':
+        scrapingFunction = scrapeFlipkartProduct;
+        break;
+      case 'myntra':
+      default:
+        scrapingFunction = scrapeMyntraProduct;
+    }
+    
     // Race against timeout
     const result = await Promise.race([
-      scrapeMyntraProduct(url),
+      scrapingFunction(url),
       timeoutPromise
     ]);
     
     return res.json(result);
   } catch (error) {
-    console.error('Error in POST API endpoint:', error);
-    console.error('Full error stack:', error.stack);
+    console.error('Error in API endpoint:', error);
     return res.status(500).json({
       success: false,
       error: 'Server error while scraping',
-      details: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      details: error.message
     });
   }
 });
 
 // Replace your existing /api/upload-csv endpoint with this fixed implementation
 app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: 'No file uploaded'
-      });
-    }
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      error: 'No CSV file uploaded'
+    });
+  }
 
+  const website = req.body.website || 'myntra';
+  
+  // Choose the appropriate scraping function based on website
+  let scrapingFunction;
+  switch (website) {
+    case 'amazon':
+      scrapingFunction = scrapeAmazonProduct;
+      break;
+    case 'flipkart':
+      scrapingFunction = scrapeFlipkartProduct;
+      break;
+    case 'myntra':
+    default:
+      scrapingFunction = scrapeMyntraProduct;
+  }
+
+  try {
     const filePath = req.file.path;
     
     // Set up streaming response
@@ -206,7 +239,7 @@ app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
             const url = `https://www.myntra.com/${productId}`;
             console.log(`Processing product ID: ${productId}`);
             
-            const result = await scrapeMyntraProduct(url);
+            const result = await scrapingFunction(url);
             
             // Synchronize writing to the response stream
             if (!isFirstResult) {

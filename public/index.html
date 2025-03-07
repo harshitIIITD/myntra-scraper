@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Myntra Scraper Tester</title>
     <style>
+        .website-selector {
+            padding: 8px;
+            width: 100%;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
         body {
             font-family: Arial, sans-serif;
             max-width: 800px;
@@ -175,6 +182,14 @@
                 <input type="text" id="url" placeholder="Enter Myntra product URL..." 
                        value="https://www.myntra.com/shirts/roadster/roadster-men-pure-cotton-sustainable-casual-shirt/2127876/buy">
             </div>
+            <div class="form-group">
+                <label for="website">Choose Website:</label>
+                <select id="website" class="website-selector">
+                    <option value="myntra" selected>Myntra</option>
+                    <option value="amazon">Amazon</option>
+                    <option value="flipkart">Flipkart</option>
+                </select>
+            </div>
             <button id="scrapeBtn">Scrape Product</button>
             
             <div id="loading">Scraping product data... This may take up to 30 seconds.</div>
@@ -189,6 +204,14 @@
                     <p>CSV should contain a column named 'style_id' or 'product_id' with Myntra product IDs.</p>
                     <p>Example: style_id,name<br>2127876,Product Name</p>
                 </div>
+            </div>
+            <div class="form-group">
+                <label for="website">Choose Website:</label>
+                <select id="website" class="website-selector">
+                    <option value="myntra" selected>Myntra</option>
+                    <option value="amazon">Amazon</option>
+                    <option value="flipkart">Flipkart</option>
+                </select>
             </div>
             <button id="uploadBtn">Upload and Scrape</button>
             
@@ -235,16 +258,25 @@
         const loading = document.getElementById('loading');
         const result = document.getElementById('result');
 
+        // Update the click event handler for scrapeBtn
         scrapeBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
+            const website = document.querySelector('#single-product #website').value;
             
             if (!url) {
-                alert('Please enter a Myntra product URL');
+                alert('Please enter a product URL');
                 return;
             }
             
-            if (!url.includes('myntra.com')) {
-                alert('Please enter a valid Myntra URL');
+            // Check URL matches selected website
+            const websiteUrls = {
+                'myntra': 'myntra.com',
+                'amazon': 'amazon',
+                'flipkart': 'flipkart.com'
+            };
+            
+            if (!url.includes(websiteUrls[website])) {
+                alert(`Please enter a valid ${website.charAt(0).toUpperCase() + website.slice(1)} URL`);
                 return;
             }
             
@@ -253,13 +285,16 @@
             result.style.display = 'none';
             
             try {
-                // Use fetch POST instead of GET for complex URLs
+                // Include website in the request body
                 const response = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ url: url })
+                    body: JSON.stringify({ 
+                        url: url,
+                        website: website 
+                    })
                 });
                 
                 // Additional debugging
@@ -352,6 +387,7 @@
         document.getElementById('uploadBtn').addEventListener('click', async () => {
             const fileInput = document.getElementById('csvFile');
             const file = fileInput.files[0];
+            const website = document.querySelector('#csv-upload #website').value;
             
             if (!file) {
                 alert('Please select a CSV file to upload');
@@ -360,6 +396,7 @@
             
             const formData = new FormData();
             formData.append('csvFile', file);
+            formData.append('website', website);
             
             const csvProgress = document.getElementById('csv-progress');
             const csvResults = document.getElementById('csv-results');

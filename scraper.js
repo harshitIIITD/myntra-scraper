@@ -1,5 +1,5 @@
 const puppeteer = require('puppeteer');
-const fs = require('fs');
+const fs = require('.fs');
 const path = require('path');
 
 // Add to the top of scraper.js
@@ -773,7 +773,251 @@ async function scrapeMyntraProduct(url) {
   });
 }
 
+// Add Amazon scraping implementation
+async function scrapeAmazonProduct(url) {
+  console.log(`Scraping Amazon product: ${url}`);
+  
+  // Extract ASIN from URL if needed
+  let productId = 'unknown';
+  const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/);
+  if (asinMatch) {
+    productId = asinMatch[1];
+  }
+  
+  // Check cache like the Myntra implementation
+  if (productCache.has(productId)) {
+    const cachedData = productCache.get(productId);
+    if (Date.now() - cachedData.timestamp < CACHE_TTL) {
+      console.log(`Returning cached data for Amazon product ${productId}`);
+      return Promise.resolve(cachedData.data);
+    }
+  }
+  
+  // Similar pattern to scrapeMyntraProduct
+  return new Promise((resolve, reject) => {
+    actualScrapeAmazonFunction(url)
+      .then(result => {
+        if (result.success) {
+          productCache.set(productId, {
+            timestamp: Date.now(),
+            data: result
+          });
+          saveToFileCache(productId, result);
+        }
+        resolve(result);
+      })
+      .catch(reject);
+  });
+}
+
+// Amazon scraping implementation
+function actualScrapeAmazonFunction(url) {
+  return new Promise(async (resolve, reject) => {
+    let page = null;
+    
+    try {
+      page = await getPage();
+      
+      // Set user agent to avoid bot detection
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+      
+      console.log(`Navigating to Amazon URL: ${url}`);
+      const response = await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      
+      if (!response || response.status() !== 200) {
+        throw new Error(`Failed to load Amazon page: ${response ? response.status() : 'No response'}`);
+      }
+      
+      // Check for CAPTCHA page
+      const pageTitle = await page.title();
+      if (pageTitle.includes('Robot') || pageTitle.includes('CAPTCHA')) {
+        throw new Error('Amazon bot protection detected. Please try again later.');
+      }
+      
+      // Extract product data
+      const productData = await page.evaluate(() => {
+        const data = {
+          title: document.querySelector('#productTitle')?.textContent.trim() || 'Unknown Product',
+          brand: document.querySelector('#bylineInfo')?.textContent.trim() || 'Unknown Brand',
+          price: document.querySelector('.a-price .a-offscreen')?.textContent.trim() || 'N/A',
+          description: document.querySelector('#productDescription')?.textContent.trim() || 
+                       document.querySelector('#feature-bullets')?.textContent.trim() || '',
+          images: [],
+          availableSizes: []
+        };
+        
+        // Get all image URLs
+        const imageElements = document.querySelectorAll('#altImages img');
+        if (imageElements && imageElements.length > 0) {
+          data.images = Array.from(imageElements)
+            .map(img => {
+              const src = img.dataset.oldHires || img.src;
+              return src.replace(/._[^.]+\./, '.'); // Convert to full-size image
+            })
+            .filter(url => url && !url.includes('spinner') && !url.includes('play-button'));
+        }
+        
+        // Get main image if altImages is empty
+        if (data.images.length === 0) {
+          const mainImage = document.querySelector('#landingImage, #imgBlkFront');
+          if (mainImage) {
+            const src = mainImage.dataset.oldHires || mainImage.src;
+            data.images.push(src);
+          }
+        }
+        
+        // Check availability
+        const availabilityText = document.querySelector('#availability')?.textContent.trim() || '';
+        data.availability = availabilityText.toLowerCase().includes('in stock') ? 'in_stock' : 'out_of_stock';
+        
+        // Extract sizes if available (for clothing items)
+        const sizeElements = document.querySelectorAll('#variation_size_name .a-size-base:not(.a-color-secondary)');
+        if (sizeElements && sizeElements.length > 0) {
+          data.availableSizes = Array.from(sizeElements)
+            .map(el => el.textContent.trim())
+            .filter(size => size);
+        }
+        
+        return data;
+      });
+      
+      console.log('Successfully scraped Amazon product data');
+      
+      resolve({
+        success: true,
+        data: productData
+      });
+    } catch (error) {
+      console.error('Error scraping Amazon:', error.message);
+      
+      resolve({
+        success: false,
+        error: 'Failed to scrape Amazon product data',
+        details: error.message || 'Unknown error'
+      });
+    } finally {
+      if (page) releasePage(page);
+    }
+  });
+}
+
+// Add Flipkart scraping implementation
+async function scrapeFlipkartProduct(url) {
+  console.log(`Scraping Flipkart product: ${url}`);
+  
+  // Extract product ID from URL
+  let productId = 'unknown';
+  const pidMatch = url.match(/pid=([^&]+)/);
+  if (pidMatch) {
+    productId = pidMatch[1];
+  } else {
+    // Alternative pattern
+    const altMatch = url.match(/\/p\/([^/]+)/);
+    if (altMatch) {
+      productId = altMatch[1];
+    }
+  }
+  
+  // Check cache like the Myntra implementation
+  if (productCache.has(productId)) {
+    const cachedData = productCache.get(productId);
+    if (Date.now() - cachedData.timestamp < CACHE_TTL) {
+      console.log(`Returning cached data for Flipkart product ${productId}`);
+      return Promise.resolve(cachedData.data);
+    }
+  }
+  
+  // Similar pattern to scrapeMyntraProduct
+  return new Promise((resolve, reject) => {
+    actualScrapeFlipkartFunction(url)
+      .then(result => {
+        if (result.success) {
+          productCache.set(productId, {
+            timestamp: Date.now(),
+            data: result
+          });
+          saveToFileCache(productId, result);
+        }
+        resolve(result);
+      })
+      .catch(reject);
+  });
+}
+
+// Flipkart scraping implementation
+function actualScrapeFlipkartFunction(url) {
+  return new Promise(async (resolve, reject) => {
+    let page = null;
+    
+    try {
+      page = await getPage();
+      
+      console.log(`Navigating to Flipkart URL: ${url}`);
+      const response = await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      
+      if (!response || response.status() !== 200) {
+        throw new Error(`Failed to load Flipkart page: ${response ? response.status() : 'No response'}`);
+      }
+      
+      // Extract product data
+      const productData = await page.evaluate(() => {
+        const data = {
+          title: document.querySelector('h1.yhB1nd')?.textContent.trim() || 
+                 document.querySelector('h1.B_NuCI')?.textContent.trim() || 'Unknown Product',
+          brand: document.querySelector('span.G6XhRU')?.textContent.trim() || 'Unknown Brand',
+          price: document.querySelector('._30jeq3')?.textContent.trim() || 'N/A',
+          description: document.querySelector('._1mXcCf')?.textContent.trim() || '',
+          images: [],
+          availableSizes: []
+        };
+        
+        // Get all image URLs
+        const imageElements = document.querySelectorAll('._2amPTt img, .CXW8mj img, ._3nMexc img');
+        if (imageElements && imageElements.length > 0) {
+          data.images = Array.from(imageElements)
+            .map(img => img.src)
+            .filter(url => url && url.includes('flipkart') && !url.includes('placeholder'));
+        }
+        
+        // Check availability
+        const outOfStock = document.querySelector('._16FRp0');
+        data.availability = outOfStock ? 'out_of_stock' : 'in_stock';
+        
+        // Extract sizes if available (for clothing items)
+        const sizeElements = document.querySelectorAll('._1fGeJ5._2UVyXR._31hAvz');
+        if (sizeElements && sizeElements.length > 0) {
+          data.availableSizes = Array.from(sizeElements)
+            .map(el => el.textContent.trim())
+            .filter(size => size);
+        }
+        
+        return data;
+      });
+      
+      console.log('Successfully scraped Flipkart product data');
+      
+      resolve({
+        success: true,
+        data: productData
+      });
+    } catch (error) {
+      console.error('Error scraping Flipkart:', error.message);
+      
+      resolve({
+        success: false,
+        error: 'Failed to scrape Flipkart product data',
+        details: error.message || 'Unknown error'
+      });
+    } finally {
+      if (page) releasePage(page);
+    }
+  });
+}
+
+// Update the exports
 module.exports = {
   scrapeMyntraProduct,
+  scrapeAmazonProduct,
+  scrapeFlipkartProduct,
   regenerateCombinedJSON
 };
