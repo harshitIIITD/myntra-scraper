@@ -355,6 +355,63 @@ app.get('/api/regenerate-products-json', async (req, res) => {
   }
 });
 
+// Add this route for CSV download
+app.get('/api/download-products-csv', async (req, res) => {
+  try {
+    // Read the products.json file
+    const productsPath = path.join(__dirname, 'products.json');
+    
+    if (!fs.existsSync(productsPath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Products file not found'
+      });
+    }
+    
+    const rawData = fs.readFileSync(productsPath, 'utf8');
+    const productsData = JSON.parse(rawData);
+    const products = productsData.products;
+    
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No products found'
+      });
+    }
+    
+    // Create CSV header
+    const headers = Object.keys(products[0]).join(',');
+    
+    // Create CSV rows
+    const rows = products.map(product => {
+      return Object.values(product).map(value => {
+        // Ensure values with commas are properly quoted
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      }).join(',');
+    });
+    
+    // Combine header and rows
+    const csv = [headers, ...rows].join('\n');
+    
+    // Set response headers for file download
+    res.setHeader('Content-Disposition', 'attachment; filename=products.csv');
+    res.setHeader('Content-Type', 'text/csv');
+    
+    // Send the CSV data
+    res.send(csv);
+  } catch (error) {
+    console.error('Error generating CSV:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate CSV',
+      details: error.message
+    });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

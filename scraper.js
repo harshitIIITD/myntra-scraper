@@ -1,5 +1,5 @@
 const puppeteer = require('puppeteer');
-const fs = require('.fs');
+const fs = require('fs');
 const path = require('path');
 
 // Add to the top of scraper.js
@@ -146,7 +146,7 @@ function saveToFileCache(productId, data) {
 function generateCombinedProductsJSON() {
   const cacheDir = path.join(__dirname, 'cache');
   const combinedPath = path.join(__dirname, 'products.json');
-  const allProducts = {};
+  const allProducts = [];
   
   // Check if cache directory exists
   if (!fs.existsSync(cacheDir)) {
@@ -176,11 +176,18 @@ function generateCombinedProductsJSON() {
         // Extract product ID from filename (remove .json extension)
         const productId = path.basename(file, '.json');
         
-        // Add to the combined object
-        allProducts[productId] = {
+        // Add to the array as a flat object (better for CSV conversion)
+        allProducts.push({
+          id: productId,
           lastUpdated: productData.timestamp,
-          ...productData.data.data
-        };
+          title: productData.data.data.title || '',
+          brand: productData.data.data.brand || '',
+          price: productData.data.data.price || '',
+          availability: productData.data.data.availability || '',
+          description: productData.data.data.description || '',
+          images: (productData.data.data.images || []).join(','),
+          availableSizes: (productData.data.data.availableSizes || []).join(',')
+        });
       } catch (err) {
         console.error(`Error processing file ${file}:`, err);
       }
@@ -191,12 +198,12 @@ function generateCombinedProductsJSON() {
       combinedPath, 
       JSON.stringify({
         lastGenerated: Date.now(),
-        productCount: Object.keys(allProducts).length,
+        productCount: allProducts.length,
         products: allProducts
       }, null, 2) // Add indentation for readability
     );
     
-    console.log(`Successfully generated combined products JSON with ${Object.keys(allProducts).length} products.`);
+    console.log(`Successfully generated combined products JSON with ${allProducts.length} products.`);
     return combinedPath;
   } catch (err) {
     console.error('Error generating combined products JSON:', err);

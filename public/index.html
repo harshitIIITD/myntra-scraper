@@ -165,10 +165,31 @@
         .description-content li {
             margin-bottom: 5px;
         }
+
+        /* Add to your existing styles */
+        .download-container {
+            margin-bottom: 20px;
+        }
+        
+        .download-btn {
+            padding: 10px 15px;
+            background-color: #4CAF50; /* Green color for download */
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .download-btn:hover {
+            background-color: #45a049;
+        }
     </style>
 </head>
 <body>
     <h1>Myntra Product Scraper</h1>
+    <div class="download-container">
+        <button id="downloadCsvBtn" class="download-btn">Download Products CSV</button>
+    </div>
     
     <div class="tab-container">
         <div class="tab-buttons">
@@ -508,6 +529,34 @@
                 };
             });
         }
+
+        // Add this to your existing JavaScript
+        document.getElementById('downloadCsvBtn').addEventListener('click', () => {
+            // Use window.location to trigger download
+            window.location.href = '/api/download-products-csv';
+        });
+        
+        // You can also add this function to check if products are available
+        async function checkProductsAvailability() {
+            try {
+                const response = await fetch('/api/regenerate-products-json');
+                const data = await response.json();
+                
+                // If no products, disable the download button
+                if (!data.success || data.productCount === 0) {
+                    const downloadBtn = document.getElementById('downloadCsvBtn');
+                    downloadBtn.disabled = true;
+                    downloadBtn.title = 'No products available to download';
+                    downloadBtn.style.backgroundColor = '#cccccc';
+                    downloadBtn.style.cursor = 'not-allowed';
+                }
+            } catch (error) {
+                console.error('Error checking products availability:', error);
+            }
+        }
+        
+        // Run this when page loads
+        checkProductsAvailability();
     </script>
 </body>
 </html>
