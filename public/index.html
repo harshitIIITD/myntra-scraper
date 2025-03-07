@@ -106,6 +106,58 @@
             max-height: 400px;
             overflow-y: auto;
         }
+        .in-stock {
+            color: #2ecc71;
+            font-weight: bold;
+        }
+        .out-of-stock {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .description {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-left: 4px solid #ff3f6c;
+        }
+        .size-section {
+            margin-top: 15px;
+        }
+
+        .size-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .size-chip {
+            display: inline-block;
+            padding: 8px 16px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .description-section {
+            margin-top: 20px;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+
+        .description-content {
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .description-content ul {
+            padding-left: 20px;
+        }
+
+        .description-content li {
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 <body>
@@ -152,6 +204,32 @@
     </div>
 
     <script>
+        // Add this function before your existing JavaScript or inside the script tags
+
+        // Helper function to format product descriptions
+        function formatDescription(description) {
+            // Format bullet points if they exist
+            description = description.replace(/•\s*([^•\n]+)/g, '<li>$1</li>');
+            if (description.includes('<li>')) {
+                description = '<ul>' + description + '</ul>';
+            }
+            
+            // Format paragraphs
+            description = description.replace(/\n\n/g, '</p><p>');
+            description = description.replace(/\n/g, '<br>');
+            
+            // Clean up any messy HTML that might result from the replacements
+            description = description.replace(/<\/p><p><li>/g, '<li>');
+            description = description.replace(/<\/li><\/p><p>/g, '</li>');
+            
+            // Wrap in paragraph if not already
+            if (!description.startsWith('<ul>') && !description.startsWith('<p>')) {
+                description = '<p>' + description + '</p>';
+            }
+            
+            return description;
+        }
+
         const scrapeBtn = document.getElementById('scrapeBtn');
         const urlInput = document.getElementById('url');
         const loading = document.getElementById('loading');
@@ -195,9 +273,52 @@
                 result.style.display = 'block';
                 
                 if (data.success) {
-                    // Format the data nicely (keep your existing code here)
-                    let html = `<h2>${data.data.title || 'Product Title'}</h2>`;
-                    // ... rest of your HTML formatting logic
+                    // Format the data nicely with availability information
+                    let availabilityClass = data.data.availability === 'in_stock' ? 'in-stock' : 'out-of-stock';
+                    let availabilityText = data.data.availability === 'in_stock' ? 'In Stock' : 'Out of Stock';
+                    
+                    let html = `
+                        <h2>${data.data.title || 'Product Title'}</h2>
+                        <p><strong>Brand:</strong> ${data.data.brand || 'N/A'}</p>
+                        <p><strong>Price:</strong> ₹${data.data.price || 'N/A'}</p>
+                        <p><strong>Availability:</strong> <span class="${availabilityClass}">${availabilityText}</span></p>
+                    `;
+                    
+                    // Add size information with visual presentation
+                    if (data.data.availableSizes && data.data.availableSizes.length > 0) {
+                        html += `<div class="size-section">
+                            <p><strong>Available Sizes:</strong></p>
+                            <div class="size-options">`;
+                        
+                        data.data.availableSizes.forEach(size => {
+                            html += `<span class="size-chip">${size}</span>`;
+                        });
+                        
+                        html += `</div></div>`;
+                    }
+                    
+                    // Add product description in a well-formatted section
+                    if (data.data.description) {
+                        html += `<div class="description-section">
+                            <h3>Product Description</h3>
+                            <div class="description-content">
+                                ${formatDescription(data.data.description)}
+                            </div>
+                        </div>`;
+                    }
+                    
+                    // Add images section
+                    if (data.data.images && data.data.images.length > 0) {
+                        html += `<h3>Product Images</h3><div class="image-preview">`;
+                        data.data.images.forEach(imgUrl => {
+                            html += `<img src="${imgUrl}" alt="${data.data.title}">`;
+                        });
+                        html += `</div>`;
+                        
+                        // Add image error handling
+                        setTimeout(addImageErrorHandling, 100);
+                    }
+                    
                     result.innerHTML = html;
                 } else {
                     result.innerHTML = `<h2>Error</h2>
@@ -277,12 +398,18 @@
                           <hr>
                         `;
                       } else {
+                        let availabilityClass = product.availability === 'in_stock' ? 'in-stock' : 'out-of-stock';
+                        let availabilityText = product.availability === 'in_stock' ? 'In Stock' : 'Out of Stock';
+                        
                         resultsHtml += `
                           <div class="result-item">
                             <h3>${product.title || 'Unknown Product'}</h3>
                             <p>ID: ${product.productId}</p>
                             <p>Brand: ${product.brand || 'N/A'}</p>
-                            <p>Price: ${product.price || 'N/A'}</p>
+                            <p>Price: ₹${product.price || 'N/A'}</p>
+                            <p>Availability: <span class="${availabilityClass}">${availabilityText}</span></p>
+                            ${product.availableSizes ? 
+                              `<p>Sizes: ${product.availableSizes.join(', ')}</p>` : ''}
                           </div>
                           <hr>
                         `;
@@ -317,6 +444,33 @@
                 csvProgress.style.display = 'none';
             }
         });
+
+        // Add this function to your existing JavaScript
+        function addImageErrorHandling() {
+            document.querySelectorAll('.image-preview img').forEach(img => {
+                img.onerror = function() {
+                    // Try an alternative image URL format
+                    const originalSrc = this.src;
+                    if (originalSrc.includes('h_1440,q_100,w_1080')) {
+                        // Try a different format
+                        this.src = originalSrc.replace('h_1440,q_100,w_1080', 'q_90');
+                    } else if (!this.hasAttribute('data-retried')) {
+                        // Mark as retried and try without parameters
+                        this.setAttribute('data-retried', 'true');
+                        
+                        // Extract base image path
+                        const urlParts = originalSrc.split('/');
+                        const domainAndPath = urlParts.slice(0, 5).join('/');
+                        const fileName = urlParts[urlParts.length - 1].split('?')[0];
+                        
+                        this.src = `${domainAndPath}/${fileName}`;
+                    } else {
+                        // If still failing, replace with placeholder
+                        this.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect width="100" height="100" fill="%23f0f0f0"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="14"%3EImage Not Available%3C/text%3E%3C/svg%3E';
+                    }
+                };
+            });
+        }
     </script>
 </body>
 </html>

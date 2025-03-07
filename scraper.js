@@ -1,9 +1,30 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+
+// Add to the top of scraper.js
+const browserPool = [];
+const MAX_BROWSERS = 3;
+
+async function getOrCreateBrowser() {
+  if (browserPool.length > 0) {
+    return browserPool.pop();
+  }
+  
+  return await puppeteer.launch({
+    headless: "new",
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox',
+      // ...existing args
+    ]
+  });
+}
 
 // At the top of your scraper.js
 const scrapingQueue = [];
 let isProcessing = false;
-const RATE_LIMIT_DELAY = 2000; // 2 seconds between requests
+const RATE_LIMIT_DELAY = 200; // 2 seconds between requests
 
 const productCache = new Map();
 const CACHE_TTL = 3600000; // 1 hour in milliseconds
@@ -103,6 +124,18 @@ function releasePage(page) {
   }
 }
 
+// Add to your scraper.js
+function saveToFileCache(productId, data) {
+  const cacheDir = path.join(__dirname, 'cache');
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir);
+  }
+  fs.writeFileSync(
+    path.join(cacheDir, `${productId}.json`), 
+    JSON.stringify({timestamp: Date.now(), data})
+  );
+}
+
 // Update the actualScrapeFunction in scraper.js to handle errors more gracefully
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
@@ -135,8 +168,29 @@ function actualScrapeFunction(url) {
         console.log('Wait for selector timed out, but continuing anyway');
       }
 
+      // Add this near the top of the file with other configuration constants
+      const SAVE_DEBUG_SCREENSHOTS = false; // Set to true when debugging is needed
+
+      // Then modify the screenshot code in actualScrapeFunction (around line 200)
+      // Replace these lines:
       // Take a screenshot for debugging purposes
       const screenshotPath = `debug-${url.split('/').pop()}-${Date.now()}.png`;
+      await page.screenshot({ path: screenshotPath });
+
+      // With this conditional code:
+      if (SAVE_DEBUG_SCREENSHOTS) {
+        const screenshotPath = `debug-${url.split('/').pop()}-${Date.now()}.png`;
+        await page.screenshot({ path: screenshotPath });
+        console.log(`Debug screenshot saved: ${screenshotPath}`);
+      }
+
+      // Try to expand any collapsed sections
+      await page.evaluate(() => {
+        const clickTargets = [
+          'button.more-details',
+          'button.show-more',
+          '.expand-button',
+          '.view-details'
         ];
         
         for (const selector of clickTargets) {
@@ -175,7 +229,8 @@ function actualScrapeFunction(url) {
           brand: "Unknown Brand",
           price: "N/A",
           description: "",
-          images: []
+          images: [],
+          availability: "unknown" 
         };
         
         try {
@@ -379,6 +434,133 @@ function actualScrapeFunction(url) {
             }
           }
           
+          // Check product availability
+          function checkAvailability() {
+            try {
+              // FIRST CHECK: Look for the ADD TO BAG div element pattern specific to Myntra
+              // This is the most reliable indicator a product is in stock
+              const addToBagElements = document.querySelectorAll('.pdp-add-to-bag:not(.pdp-out-of-stock)');
+              if (addToBagElements && addToBagElements.length > 0) {
+                console.log("Found ADD TO BAG element - product is in stock");
+                return 'in_stock';
+              }
+              
+              // SECOND CHECK: Check for specific out-of-stock indicators used by Myntra
+              const outOfStockElements = document.querySelectorAll('.size-buttons-out-of-stock, .pdp-out-of-stock, .soldOutP');
+              if (outOfStockElements && outOfStockElements.length > 0) {
+                console.log("Found out of stock indicator elements");
+                return 'out_of_stock';
+              }
+              
+              // THIRD CHECK: Check text content for "out of stock" phrases
+              // Use parentElement check to target only text directly in these elements
+              const stockStatusElements = document.querySelectorAll('.pdp-add-to-bag, .pdp-action-container, .size-buttons-container');
+              for (const element of stockStatusElements) {
+                if (element.textContent.toLowerCase().includes('out of stock') || 
+                    element.textContent.toLowerCase().includes('sold out')) {
+                  console.log("Found 'out of stock' text in relevant element");
+                  return 'out_of_stock';
+                }
+              }
+              
+              // FOURTH CHECK: Check if all size buttons are marked as out of stock
+              const sizeElements = document.querySelectorAll('.size-buttons-unified-size');
+              if (sizeElements && sizeElements.length > 0) {
+                const allSizesOutOfStock = Array.from(sizeElements).every(el => 
+                  el.classList.contains('size-buttons-unified-size-out-of-stock') || 
+                  el.classList.contains('size-buttons-unified-size-strike-hide')
+                );
+                
+                if (allSizesOutOfStock) {
+                  console.log("All size buttons are marked as out of stock");
+                  return 'out_of_stock';
+                } else {
+                  console.log("Found available sizes - product is in stock");
+                  return 'in_stock';
+                }
+              }
+              
+              // FIFTH CHECK: Final check for any ADD TO BAG text in relevant containers
+              const anyBagText = document.body.textContent.includes('ADD TO BAG');
+              if (anyBagText && !document.body.textContent.includes('OUT OF STOCK')) {
+                console.log("Found ADD TO BAG text without OUT OF STOCK text");
+                return 'in_stock';
+              }
+              
+              // Default to in_stock for Myntra (as they typically don't show unavailable products)
+              console.log("No definitive indicators found, defaulting to in_stock");
+              return 'in_stock';
+            } catch (e) {
+              console.error('Error checking availability:', e);
+              return 'in_stock'; // Default to in_stock on error
+            }
+          }
+
+          // Add this to the initial data object
+          data.availability = checkAvailability();
+
+          // Also check if any sizes are available (Myntra often has size selectors)
+          try {
+            const sizeElements = document.querySelectorAll('.size-buttons-unified-size');
+            const availableSizes = Array.from(sizeElements)
+              .filter(el => !el.classList.contains('size-buttons-unified-size-out-of-stock') && 
+                          !el.classList.contains('size-buttons-unified-size-strike-hide'))
+              .map(el => el.textContent.trim());
+            
+            if (availableSizes.length > 0) {
+              data.availableSizes = availableSizes;
+              data.availability = 'in_stock';
+            } else if (sizeElements.length > 0) {
+              // If there are size elements but none are available
+              data.availableSizes = [];
+              data.availability = 'out_of_stock';
+            }
+          } catch (e) {
+            console.error('Error extracting size availability:', e);
+          }
+          
+          // Try to extract multiple product images
+          try {
+            // First look for Myntra's image carousel
+            const imageContainers = document.querySelectorAll('.image-grid-imageContainer, .image-grid-container img, .image-grid-image');
+            if (imageContainers && imageContainers.length > 0) {
+              data.images = Array.from(imageContainers)
+                .map(img => {
+                  // Try multiple ways to get the image URL
+                  const src = img.src || img.getAttribute('src') || 
+                             img.style.backgroundImage?.replace(/^url\(['"](.+)['"]\)$/, '$1') ||
+                             img.getAttribute('data-src');
+                  return src;
+                })
+                .filter(url => url && url.includes('myntassets.com')); // Only keep valid Myntra URLs
+            }
+            
+            // If no images found, look for product schema images
+            if (!data.images || data.images.length === 0) {
+              const schemaImages = document.querySelector('script[type="application/ld+json"]');
+              if (schemaImages) {
+                try {
+                  const jsonData = JSON.parse(schemaImages.textContent);
+                  if (jsonData.image) {
+                    data.images = Array.isArray(jsonData.image) ? jsonData.image : [jsonData.image];
+                  }
+                } catch (e) {
+                  console.error('Error parsing image JSON', e);
+                }
+              }
+            }
+            
+            // Last resort - get any images with product IDs in the URL
+            if (!data.images || data.images.length === 0) {
+              const allImages = document.querySelectorAll('img');
+              data.images = Array.from(allImages)
+                .map(img => img.src || img.getAttribute('src'))
+                .filter(url => url && url.includes('myntassets.com'));
+            }
+          } catch (e) {
+            console.error('Error extracting product images:', e);
+          }
+          
         } catch (e) {
           console.error('Error extracting product data:', e);
         }
@@ -406,6 +588,69 @@ function actualScrapeFunction(url) {
       if (page) releasePage(page);
     }
   });
+}
+
+// Replace your existing checkAvailability function with this improved version
+
+function checkAvailability() {
+  try {
+    // FIRST CHECK: Look for the ADD TO BAG div element pattern specific to Myntra
+    // This is the most reliable indicator a product is in stock
+    const addToBagElements = document.querySelectorAll('.pdp-add-to-bag:not(.pdp-out-of-stock)');
+    if (addToBagElements && addToBagElements.length > 0) {
+      console.log("Found ADD TO BAG element - product is in stock");
+      return 'in_stock';
+    }
+    
+    // SECOND CHECK: Check for specific out-of-stock indicators used by Myntra
+    const outOfStockElements = document.querySelectorAll('.size-buttons-out-of-stock, .pdp-out-of-stock, .soldOutP');
+    if (outOfStockElements && outOfStockElements.length > 0) {
+      console.log("Found out of stock indicator elements");
+      return 'out_of_stock';
+    }
+    
+    // THIRD CHECK: Check text content for "out of stock" phrases
+    // Use parentElement check to target only text directly in these elements
+    const stockStatusElements = document.querySelectorAll('.pdp-add-to-bag, .pdp-action-container, .size-buttons-container');
+    for (const element of stockStatusElements) {
+      if (element.textContent.toLowerCase().includes('out of stock') || 
+          element.textContent.toLowerCase().includes('sold out')) {
+        console.log("Found 'out of stock' text in relevant element");
+        return 'out_of_stock';
+      }
+    }
+    
+    // FOURTH CHECK: Check if all size buttons are marked as out of stock
+    const sizeElements = document.querySelectorAll('.size-buttons-unified-size');
+    if (sizeElements && sizeElements.length > 0) {
+      const allSizesOutOfStock = Array.from(sizeElements).every(el => 
+        el.classList.contains('size-buttons-unified-size-out-of-stock') || 
+        el.classList.contains('size-buttons-unified-size-strike-hide')
+      );
+      
+      if (allSizesOutOfStock) {
+        console.log("All size buttons are marked as out of stock");
+        return 'out_of_stock';
+      } else {
+        console.log("Found available sizes - product is in stock");
+        return 'in_stock';
+      }
+    }
+    
+    // FIFTH CHECK: Final check for any ADD TO BAG text in relevant containers
+    const anyBagText = document.body.textContent.includes('ADD TO BAG');
+    if (anyBagText && !document.body.textContent.includes('OUT OF STOCK')) {
+      console.log("Found ADD TO BAG text without OUT OF STOCK text");
+      return 'in_stock';
+    }
+    
+    // Default to in_stock for Myntra (as they typically don't show unavailable products)
+    console.log("No definitive indicators found, defaulting to in_stock");
+    return 'in_stock';
+  } catch (e) {
+    console.error('Error checking availability:', e);
+    return 'in_stock'; // Default to in_stock on error
+  }
 }
 
 // Update the scrapeMyntraProduct function in scraper.js
@@ -447,6 +692,7 @@ async function scrapeMyntraProduct(url) {
             timestamp: Date.now(),
             data: result
           });
+          saveToFileCache(productId, result);
         }
         resolve(result);
       })
