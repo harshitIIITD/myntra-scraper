@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const scrapeMyntraProduct = require('./scraper');
+const { scrapeMyntraProduct, regenerateCombinedJSON } = require('./scraper');
 // Add these imports at the top with your other requires
 const multer = require('multer');
 const csv = require('csv-parser');
@@ -301,6 +301,25 @@ app.get('/api/test', (req, res) => {
     message: 'API is working correctly',
     timestamp: new Date().toISOString()
   });
+});
+
+// Add this route to regenerate the combined JSON file
+app.get('/api/regenerate-products-json', async (req, res) => {
+  try {
+    const filePath = await regenerateCombinedJSON();
+    res.json({
+      success: true,
+      message: 'Products JSON regenerated successfully',
+      path: filePath
+    });
+  } catch (error) {
+    console.error('Error regenerating products JSON:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to regenerate products JSON',
+      details: error.message
+    });
+  }
 });
 
 // Start the server

@@ -130,10 +130,83 @@ function saveToFileCache(productId, data) {
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
+  
+  // Save individual product cache
   fs.writeFileSync(
     path.join(cacheDir, `${productId}.json`), 
     JSON.stringify({timestamp: Date.now(), data})
   );
+  
+  // Regenerate the combined JSON after adding a new product
+  generateCombinedProductsJSON();
+}
+
+// Add this function to generate a combined products JSON file
+
+function generateCombinedProductsJSON() {
+  const cacheDir = path.join(__dirname, 'cache');
+  const combinedPath = path.join(__dirname, 'products.json');
+  const allProducts = {};
+  
+  // Check if cache directory exists
+  if (!fs.existsSync(cacheDir)) {
+    console.log('Cache directory does not exist, creating it.');
+    fs.mkdirSync(cacheDir);
+    return; // No files to process
+  }
+  
+  try {
+    // Read all JSON files in the cache directory
+    const files = fs.readdirSync(cacheDir).filter(file => file.endsWith('.json'));
+    
+    if (files.length === 0) {
+      console.log('No product cache files found.');
+      return;
+    }
+    
+    console.log(`Found ${files.length} product files in cache.`);
+    
+    // Process each file and build the combined data
+    for (const file of files) {
+      try {
+        const filePath = path.join(cacheDir, file);
+        const rawData = fs.readFileSync(filePath, 'utf8');
+        const productData = JSON.parse(rawData);
+        
+        // Extract product ID from filename (remove .json extension)
+        const productId = path.basename(file, '.json');
+        
+        // Add to the combined object
+        allProducts[productId] = {
+          lastUpdated: productData.timestamp,
+          ...productData.data.data
+        };
+      } catch (err) {
+        console.error(`Error processing file ${file}:`, err);
+      }
+    }
+    
+    // Save the combined data
+    fs.writeFileSync(
+      combinedPath, 
+      JSON.stringify({
+        lastGenerated: Date.now(),
+        productCount: Object.keys(allProducts).length,
+        products: allProducts
+      }, null, 2) // Add indentation for readability
+    );
+    
+    console.log(`Successfully generated combined products JSON with ${Object.keys(allProducts).length} products.`);
+    return combinedPath;
+  } catch (err) {
+    console.error('Error generating combined products JSON:', err);
+  }
+}
+
+// Add an endpoint to manually regenerate the combined JSON
+// This can be called via API rather than regenerating on every save
+async function regenerateCombinedJSON() {
+  return generateCombinedProductsJSON();
 }
 
 // Update the actualScrapeFunction in scraper.js to handle errors more gracefully
@@ -174,8 +247,8 @@ function actualScrapeFunction(url) {
       // Then modify the screenshot code in actualScrapeFunction (around line 200)
       // Replace these lines:
       // Take a screenshot for debugging purposes
-      const screenshotPath = `debug-${url.split('/').pop()}-${Date.now()}.png`;
-      await page.screenshot({ path: screenshotPath });
+      // const screenshotPath = `debug-${url.split('/').pop()}-${Date.now()}.png`;
+      // await page.screenshot({ path: screenshotPath });
 
       // With this conditional code:
       if (SAVE_DEBUG_SCREENSHOTS) {
@@ -700,4 +773,7 @@ async function scrapeMyntraProduct(url) {
   });
 }
 
-module.exports = scrapeMyntraProduct;
+module.exports = {
+  scrapeMyntraProduct,
+  regenerateCombinedJSON
+};
