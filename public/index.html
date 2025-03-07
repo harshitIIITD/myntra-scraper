@@ -184,6 +184,121 @@
             background-color: #45a049;
         }
     </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+    <style>
+        /* Advanced Data Analysis Styles */
+        .data-analysis {
+            margin-top: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        
+        .price-history {
+            margin-top: 15px;
+            height: 300px;
+            position: relative;
+        }
+        
+        .price-alert {
+            margin-top: 20px;
+            padding: 15px;
+            border-top: 1px solid #eee;
+        }
+        
+        .price-alert input {
+            width: 120px;
+            padding: 8px;
+            margin-right: 10px;
+        }
+        
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        .comparison-table th, 
+        .comparison-table td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        
+        .comparison-table th {
+            background-color: #f0f0f0;
+        }
+        
+        .best-price {
+            background-color: #e8f5e9;
+            font-weight: bold;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        
+        .analysis-tab-button {
+            padding: 10px 15px;
+            background-color: #f0f0f0;
+            border: none;
+            cursor: pointer;
+            margin-right: 5px;
+            border-radius: 4px 4px 0 0;
+        }
+        
+        .analysis-tab-button.active {
+            background-color: #ff3f6c;
+            color: white;
+        }
+        
+        .analysis-tab-content {
+            display: none;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 0 0 4px 4px;
+        }
+        
+        .analysis-tab-content.active {
+            display: block;
+        }
+        
+        .alert-card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #f9f9f9;
+        }
+        
+        .alert-info {
+            flex: 1;
+        }
+        
+        .alert-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .alert-actions button {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .delete-alert {
+            background-color: #ff5252;
+        }
+        
+        .edit-alert {
+            background-color: #4caf50;
+        }
+    </style>
 </head>
 <body>
     <h1>Myntra Product Scraper</h1>
@@ -215,6 +330,45 @@
             
             <div id="loading">Scraping product data... This may take up to 30 seconds.</div>
             <div id="result"></div>
+            <div id="advanced-analysis" class="data-analysis" style="display:none;">
+                <h2>Advanced Product Analysis</h2>
+                
+                <div class="tab-buttons">
+                    <button class="analysis-tab-button active" data-tab="price-tracking">Price Tracking</button>
+                    <button class="analysis-tab-button" data-tab="price-alerts">Price Alerts</button>
+                    <button class="analysis-tab-button" data-tab="competitor-analysis">Competitor Analysis</button>
+                </div>
+                
+                <div id="price-tracking" class="analysis-tab-content active">
+                    <h3>Price History</h3>
+                    <div class="price-history">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                    <p><small>* Price history data is collected from each scrape. More frequent scraping provides better data points.</small></p>
+                </div>
+                
+                <div id="price-alerts" class="analysis-tab-content">
+                    <h3>Price Drop Alerts</h3>
+                    <div class="price-alert">
+                        <p>Set an alert when the price drops below:</p>
+                        <div>
+                            <input type="number" id="alertPrice" placeholder="Price" min="1">
+                            <button id="setAlert" class="download-btn">Set Alert</button>
+                        </div>
+                    </div>
+                    <div id="alertsList">
+                        <h4>Your Active Alerts</h4>
+                        <div id="alertsContainer"></div>
+                    </div>
+                </div>
+                
+                <div id="competitor-analysis" class="analysis-tab-content">
+                    <h3>Cross-Platform Price Comparison</h3>
+                    <p>Compare this product's price across different platforms:</p>
+                    <button id="compareBtn" class="download-btn">Compare Prices</button>
+                    <div id="comparisonResults"></div>
+                </div>
+            </div>
         </div>
         
         <div id="csv-upload" class="tab-content">
@@ -557,6 +711,434 @@
         
         // Run this when page loads
         checkProductsAvailability();
+
+        // Add this to your existing JavaScript section
+        // filepath: /home/kali/Documents/myntra website scrapper/myntra-scraper/public/index.html
+        // Price Tracking & Advanced Analysis Functions
+        let priceChart = null;
+        let currentProductId = null;
+        let currentProductData = null;
+
+        // Function to update UI when product data is loaded
+        function updateAdvancedAnalysis(productData) {
+            currentProductData = productData;
+            
+            // Extract product ID from URL or data
+            const urlSegments = urlInput.value.trim().split('/');
+            currentProductId = urlSegments[urlSegments.length - 2] || urlSegments[urlSegments.length - 1];
+            
+            // Show the advanced analysis section
+            document.getElementById('advanced-analysis').style.display = 'block';
+            
+            // Load price history
+            loadPriceHistory(currentProductId);
+            
+            // Load saved price alerts
+            loadPriceAlerts(currentProductId);
+        }
+
+        // Function to load price history data for a product
+        async function loadPriceHistory(productId) {
+            try {
+                const response = await fetch(`/api/price-history/${productId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    renderPriceChart(data.history);
+                } else {
+                    // If no history exists yet, create with current data point
+                    const singleDataPoint = [{
+                        date: new Date().toISOString(),
+                        price: currentProductData.price
+                    }];
+                    renderPriceChart(singleDataPoint);
+                }
+            } catch (error) {
+                console.error('Error loading price history:', error);
+                document.getElementById('priceChart').innerHTML = 
+                    '<p>Failed to load price history. This feature requires multiple scrapes of the same product over time.</p>';
+            }
+        }
+
+        // Function to render the price chart
+        function renderPriceChart(priceData) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (priceChart) {
+                priceChart.destroy();
+            }
+            
+            // Format data for Chart.js
+            const labels = priceData.map(item => {
+                const date = new Date(item.date);
+                return date.toLocaleDateString();
+            });
+            
+            const prices = priceData.map(item => parseFloat(item.price));
+            
+            // Create the chart
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Price (₹)',
+                        data: prices,
+                        backgroundColor: 'rgba(255, 63, 108, 0.2)',
+                        borderColor: 'rgba(255, 63, 108, 1)',
+                        borderWidth: 2,
+                        pointBackgroundColor: 'rgba(255, 63, 108, 1)',
+                        pointRadius: 4,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Price (₹)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `₹${context.parsed.y}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Function to handle price alerts
+        document.getElementById('setAlert').addEventListener('click', () => {
+            const alertPrice = document.getElementById('alertPrice').value;
+            
+            if (!alertPrice || isNaN(alertPrice) || alertPrice <= 0) {
+                alert('Please enter a valid price for the alert');
+                return;
+            }
+            
+            if (!currentProductId || !currentProductData) {
+                alert('No product selected');
+                return;
+            }
+            
+            // Save alert to localStorage
+            saveAlert(currentProductId, alertPrice);
+            
+            // Update the alerts list
+            loadPriceAlerts(currentProductId);
+            
+            // Clear input
+            document.getElementById('alertPrice').value = '';
+        });
+
+        // Function to save an alert
+        function saveAlert(productId, targetPrice) {
+            const alerts = JSON.parse(localStorage.getItem('priceAlerts') || '{}');
+            
+            if (!alerts[productId]) {
+                alerts[productId] = [];
+            }
+            
+            // Add the new alert with a unique ID
+            alerts[productId].push({
+                id: Date.now(),
+                productId: productId,
+                targetPrice: targetPrice,
+                productTitle: currentProductData.title,
+                currentPrice: currentProductData.price,
+                dateCreated: new Date().toISOString()
+            });
+            
+            localStorage.setItem('priceAlerts', JSON.stringify(alerts));
+        }
+
+        // Function to load saved alerts
+        function loadPriceAlerts(productId) {
+            const alerts = JSON.parse(localStorage.getItem('priceAlerts') || '{}');
+            const productAlerts = alerts[productId] || [];
+            const alertsContainer = document.getElementById('alertsContainer');
+            
+            if (productAlerts.length === 0) {
+                alertsContainer.innerHTML = '<p>No price alerts set for this product.</p>';
+                return;
+            }
+            
+            let alertsHtml = '';
+            productAlerts.forEach(alert => {
+                const isTriggered = parseFloat(currentProductData.price) <= parseFloat(alert.targetPrice);
+                const statusClass = isTriggered ? 'in-stock' : '';
+                const statusText = isTriggered ? '✓ Alert triggered! Current price is below your target.' : '';
+                
+                alertsHtml += `
+                    <div class="alert-card" data-id="${alert.id}">
+                        <div class="alert-info">
+                            <p><strong>Target Price:</strong> ₹${alert.targetPrice}</p>
+                            <p><strong>Current Price:</strong> ₹${currentProductData.price}</p>
+                            <p><small>Created: ${new Date(alert.dateCreated).toLocaleDateString()}</small></p>
+                            <p class="${statusClass}">${statusText}</p>
+                        </div>
+                        <div class="alert-actions">
+                            <button class="delete-alert" onclick="deleteAlert('${productId}', ${alert.id})">Delete</button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            alertsContainer.innerHTML = alertsHtml;
+        }
+
+        // Function to delete an alert
+        function deleteAlert(productId, alertId) {
+            const alerts = JSON.parse(localStorage.getItem('priceAlerts') || '{}');
+            
+            if (alerts[productId]) {
+                alerts[productId] = alerts[productId].filter(alert => alert.id !== alertId);
+                
+                if (alerts[productId].length === 0) {
+                    delete alerts[productId];
+                }
+                
+                localStorage.setItem('priceAlerts', JSON.stringify(alerts));
+                loadPriceAlerts(productId);
+            }
+        }
+
+        // Function to handle cross-platform comparison
+        document.getElementById('compareBtn').addEventListener('click', async () => {
+            const comparisonResults = document.getElementById('comparisonResults');
+            comparisonResults.innerHTML = '<p>Searching for this product across platforms...</p>';
+            
+            try {
+                // Extract product info to search
+                const searchTerm = currentProductData.brand + ' ' + currentProductData.title.split(' ').slice(0, 3).join(' ');
+                
+                const response = await fetch('/api/compare-prices', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        productId: currentProductId,
+                        searchTerm: searchTerm
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    renderComparisonTable(data.results);
+                } else {
+                    comparisonResults.innerHTML = `<p>Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                console.error('Error comparing prices:', error);
+                comparisonResults.innerHTML = '<p>Error fetching comparison data. Please try again.</p>';
+            }
+        });
+
+        // Function to render price comparison table
+        function renderComparisonTable(results) {
+            const comparisonResults = document.getElementById('comparisonResults');
+            
+            if (!results || results.length === 0) {
+                comparisonResults.innerHTML = '<p>No comparison data available for this product.</p>';
+                return;
+            }
+            
+            // Find the best price
+            const validPrices = results
+                .filter(r => !isNaN(parseFloat(r.price)))
+                .map(r => parseFloat(r.price));
+            
+            const bestPrice = Math.min(...validPrices);
+            
+            let html = `
+                <h4>Price Comparison Results</h4>
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Platform</th>
+                            <th>Price</th>
+                            <th>Title</th>
+                            <th>Availability</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            results.forEach(result => {
+                const price = parseFloat(result.price);
+                const isBestPrice = price === bestPrice;
+                
+                html += `
+                    <tr class="${isBestPrice ? 'best-price' : ''}">
+                        <td>${result.platform}</td>
+                        <td>₹${result.price}${isBestPrice ? ' (Best Price!)' : ''}</td>
+                        <td>${result.title}</td>
+                        <td>${result.availability === 'in_stock' ? 'In Stock' : 'Out of Stock'}</td>
+                        <td><a href="${result.url}" target="_blank">View</a></td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                    </tbody>
+                </table>
+            `;
+            
+            comparisonResults.innerHTML = html;
+        }
+
+        // Tab switching for analysis tabs
+        document.querySelectorAll('.analysis-tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                // Remove active class from all buttons and contents
+                document.querySelectorAll('.analysis-tab-button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.analysis-tab-content').forEach(c => c.classList.remove('active'));
+                
+                // Add active class to clicked button and corresponding content
+                button.classList.add('active');
+                document.getElementById(button.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Update the scrapeBtn click handler to include advanced analysis
+        // Modify the existing scrapeBtn event listener
+        const originalScrapeHandler = scrapeBtn.onclick;
+        scrapeBtn.onclick = null;
+
+        scrapeBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            const website = document.querySelector('#single-product #website').value;
+            
+            if (!url) {
+                alert('Please enter a product URL');
+                return;
+            }
+            
+            // Check URL matches selected website
+            const websiteUrls = {
+                'myntra': 'myntra.com',
+                'amazon': 'amazon',
+                'flipkart': 'flipkart.com'
+            };
+            
+            if (!url.includes(websiteUrls[website])) {
+                alert(`Please enter a valid ${website.charAt(0).toUpperCase() + website.slice(1)} URL`);
+                return;
+            }
+            
+            // Show loading
+            loading.style.display = 'block';
+            result.style.display = 'none';
+            document.getElementById('advanced-analysis').style.display = 'none';
+            
+            try {
+                // Include website in the request body
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        url: url,
+                        website: website 
+                    })
+                });
+                
+                // Additional debugging
+                console.log('Response status:', response.status);
+                
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                // Display result
+                loading.style.display = 'none';
+                result.style.display = 'block';
+                
+                if (data.success) {
+                    // Format the data nicely with availability information
+                    let availabilityClass = data.data.availability === 'in_stock' ? 'in-stock' : 'out-of-stock';
+                    let availabilityText = data.data.availability === 'in_stock' ? 'In Stock' : 'Out of Stock';
+                    
+                    let html = `
+                        <h2>${data.data.title || 'Product Title'}</h2>
+                        <p><strong>Brand:</strong> ${data.data.brand || 'N/A'}</p>
+                        <p><strong>Price:</strong> ₹${data.data.price || 'N/A'}</p>
+                        <p><strong>Availability:</strong> <span class="${availabilityClass}">${availabilityText}</span></p>
+                    `;
+                    
+                    // Add size information with visual presentation
+                    if (data.data.availableSizes && data.data.availableSizes.length > 0) {
+                        html += `<div class="size-section">
+                            <p><strong>Available Sizes:</strong></p>
+                            <div class="size-options">`;
+                        
+                        data.data.availableSizes.forEach(size => {
+                            html += `<span class="size-chip">${size}</span>`;
+                        });
+                        
+                        html += `</div></div>`;
+                    }
+                    
+                    // Add product description in a well-formatted section
+                    if (data.data.description) {
+                        html += `<div class="description-section">
+                            <h3>Product Description</h3>
+                            <div class="description-content">
+                                ${formatDescription(data.data.description)}
+                            </div>
+                        </div>`;
+                    }
+                    
+                    // Add images section
+                    if (data.data.images && data.data.images.length > 0) {
+                        html += `<h3>Product Images</h3><div class="image-preview">`;
+                        data.data.images.forEach(imgUrl => {
+                            html += `<img src="${imgUrl}" alt="${data.data.title}">`;
+                        });
+                        html += `</div>`;
+                        
+                        // Add image error handling
+                        setTimeout(addImageErrorHandling, 100);
+                    }
+                    
+                    result.innerHTML = html;
+                    
+                    // Initialize advanced analysis with the product data
+                    updateAdvancedAnalysis(data.data);
+                } else {
+                    result.innerHTML = `<h2>Error</h2>
+                                      <p>${data.error || 'Unknown error'}</p>
+                                      <p>${data.details || ''}</p>`;
+                }
+            } catch (error) {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+                result.innerHTML = `<h2>Error</h2>
+                                  <p>Failed to communicate with the server</p>
+                                  <p>${error.message}</p>`;
+                console.error('Error:', error);
+            }
+        });
     </script>
 </body>
 </html>

@@ -12,6 +12,12 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 
+// Ensure price-history directory exists
+const priceHistoryDir = path.join(__dirname, 'price-history');
+if (!fs.existsSync(priceHistoryDir)) {
+  fs.mkdirSync(priceHistoryDir);
+}
+
 // Replace this line in server.js
 // const pLimit = require('p-limit');
 
@@ -64,9 +70,9 @@ app.get('/api/scrape', async (req, res) => {
       setTimeout(() => reject(new Error('Request timeout after 60s')), 60000)
     );
     
-    // Race against timeout
+    // Race against timeout - use the wrapper function for Myntra
     const result = await Promise.race([
-      scrapeMyntraProduct(url),
+      scrapeMyntraProductWithHistory(url),
       timeoutPromise
     ]);
     
@@ -113,7 +119,8 @@ app.post('/api/scrape', async (req, res) => {
         break;
       case 'myntra':
       default:
-        scrapingFunction = scrapeMyntraProduct;
+        // Use the wrapper function for Myntra
+        scrapingFunction = scrapeMyntraProductWithHistory;
     }
     
     // Race against timeout
@@ -155,7 +162,8 @@ app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
       break;
     case 'myntra':
     default:
-      scrapingFunction = scrapeMyntraProduct;
+      // Use the wrapper function for Myntra
+      scrapingFunction = scrapeMyntraProductWithHistory;
   }
 
   try {
@@ -411,6 +419,167 @@ app.get('/api/download-products-csv', async (req, res) => {
     });
   }
 });
+
+// Add these routes to support the advanced analysis features
+
+// Route to get price history for a product
+app.get('/api/price-history/:productId', (req, res) => {
+  const { productId } = req.params;
+  const historyPath = path.join(__dirname, 'price-history', `${productId}.json`);
+  
+  try {
+    if (fs.existsSync(historyPath)) {
+      const historyData = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+      res.json({
+        success: true,
+        history: historyData
+      });
+    } else {
+      // If no history file exists yet, create an empty one for future use
+      const initialData = [];
+      
+      // Ensure directory exists
+      const historyDir = path.join(__dirname, 'price-history');
+      if (!fs.existsSync(historyDir)) {
+        fs.mkdirSync(historyDir);
+      }
+      
+      fs.writeFileSync(historyPath, JSON.stringify(initialData));
+      
+      res.json({
+        success: true,
+        history: initialData
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching price history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve price history'
+    });
+  }
+});
+
+// Route for cross-platform price comparison
+app.post('/api/compare-prices', async (req, res) => {
+  const { productId, searchTerm } = req.body;
+  
+  if (!productId || !searchTerm) {
+    return res.status(400).json({
+      success: false,
+      error: 'Product ID and search term are required'
+    });
+  }
+  
+  try {
+    // Get current product data from cache
+    const productCachePath = path.join(__dirname, 'cache', `${productId}.json`);
+    
+    if (!fs.existsSync(productCachePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Product not found in cache'
+      });
+    }
+    
+    const productData = JSON.parse(fs.readFileSync(productCachePath, 'utf8'));
+    
+    // Create comparison results (in a real implementation, you would search other platforms)
+    // For now, we'll simulate with mock data
+    const comparisonResults = [
+      {
+        platform: 'Myntra',
+        price: productData.data.data.price,
+        title: productData.data.data.title,
+        availability: productData.data.data.availability,
+        url: `https://www.myntra.com/products/${productId}`
+      },
+      // Simulate Amazon result (in production, you'd actually scrape or use an API)
+      {
+        platform: 'Amazon',
+        price: Math.round(parseInt(productData.data.data.price) * (Math.random() * 0.3 + 0.85)), // Random price variation
+        title: `${productData.data.data.brand} ${productData.data.data.title.split(' ').slice(0, 4).join(' ')}`,
+        availability: Math.random() > 0.3 ? 'in_stock' : 'out_of_stock', // Random availability
+        url: `https://www.amazon.in/s?k=${encodeURIComponent(searchTerm)}`
+      },
+      // Simulate Flipkart result
+      {
+        platform: 'Flipkart',
+        price: Math.round(parseInt(productData.data.data.price) * (Math.random() * 0.3 + 0.85)), // Random price variation
+        title: `${productData.data.data.brand} ${productData.data.data.title.split(' ').slice(0, 4).join(' ')}`,
+        availability: Math.random() > 0.3 ? 'in_stock' : 'out_of_stock', // Random availability
+        url: `https://www.flipkart.com/search?q=${encodeURIComponent(searchTerm)}`
+      }
+    ];
+    
+    res.json({
+      success: true,
+      results: comparisonResults
+    });
+    
+  } catch (error) {
+    console.error('Error comparing prices:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to compare prices',
+      details: error.message
+    });
+  }
+});
+
+// Modify your existing scrape function to update price history
+const originalScrapeMyntraProduct = scrapeMyntraProduct;
+
+// Instead of replacing the original function, create a wrapper function
+async function scrapeMyntraProductWithHistory(url) {
+  const result = await originalScrapeMyntraProduct(url);
+  
+  if (result.success) {
+    try {
+      // Extract product ID from URL
+      const urlSegments = url.split('/');
+      const productId = urlSegments[urlSegments.length - 2] || urlSegments[urlSegments.length - 1];
+      
+      // Ensure price history directory exists
+      const historyDir = path.join(__dirname, 'price-history');
+      if (!fs.existsSync(historyDir)) {
+        fs.mkdirSync(historyDir);
+      }
+      
+      // Path to history file
+      const historyPath = path.join(historyDir, `${productId}.json`);
+      
+      // Read existing history or create new array
+      let history = [];
+      if (fs.existsSync(historyPath)) {
+        history = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+      }
+      
+      // Add new price data point
+      history.push({
+        date: new Date().toISOString(),
+        price: result.data.price
+      });
+      
+      // Keep only last 30 data points to prevent file from growing too large
+      if (history.length > 30) {
+        history = history.slice(history.length - 30);
+      }
+      
+      // Save updated history
+      fs.writeFileSync(historyPath, JSON.stringify(history));
+      
+    } catch (error) {
+      console.error('Error updating price history:', error);
+      // Don't fail the main scrape if history update fails
+    }
+  }
+  
+  return result;
+}
+
+// Use the wrapper function directly in the routes instead of reassigning
+// Update the scraping function references
 
 // Start the server
 app.listen(PORT, () => {
