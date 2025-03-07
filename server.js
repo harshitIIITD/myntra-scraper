@@ -182,7 +182,7 @@ app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
     console.log(`Found ${productIds.length} product IDs in CSV`);
     
     // Limit number of products to process (optional, for performance)
-    const MAX_PRODUCTS_TO_PROCESS = 100;
+    const MAX_PRODUCTS_TO_PROCESS = 10000000;
     const productsToProcess = productIds.slice(0, MAX_PRODUCTS_TO_PROCESS);
     
     if (productsToProcess.length === 0) {
