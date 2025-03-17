@@ -78,10 +78,8 @@ async function initBrowser() {
       defaultViewport: { width: 1920, height: 1080 }
     };
     
-    // Add specific Chrome path for Linux environments
-    if (process.platform === 'linux') {
-      options.executablePath = '/usr/bin/chromium-browser';
-    }
+    // Always use this path on Render
+    options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser';
     
     browser = await puppeteer.launch(options);
   }
@@ -1040,3 +1038,10 @@ module.exports = {
   scrapeFlipkartProduct,
   regenerateCombinedJSON
 };
+
+// Add to server.js
+// Memory monitoring
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  console.log(`Memory usage: ${Math.round(memUsage.rss / 1024 / 1024)}MB`);
+}, 60000);

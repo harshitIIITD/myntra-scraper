@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: myntra-scraper
+    env: docker
+    dockerfilePath: ./docker-compose.Dockerfile  # Explicitly specify the path
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: true
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1

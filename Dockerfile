@@ -31,7 +31,8 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Create cache directory with proper permissions
-RUN mkdir -p /app/cache && chmod -R 777 /app/cache
+RUN mkdir -p /app/cache /app/price-history /app/uploads /app/user-state /app/logs \
+    && chmod -R 777 /app/cache /app/price-history /app/uploads /app/user-state /app/logs
 
 # Set working directory
 WORKDIR /app
@@ -44,9 +45,6 @@ RUN npm install
 
 # Copy project files
 COPY . .
-
-# Create log directory with proper permissions
-RUN mkdir -p /app/logs && chmod -R 777 /app/logs
 
 # Expose the port that your app runs on
 EXPOSE 3001
