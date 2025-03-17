@@ -801,6 +801,24 @@ process.on('SIGTERM', async () => {
   if (browser) await browser.close();
   process.exit(0);
 });
+// Add to server.js
+// Memory monitoring
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  console.log(`Memory usage: ${Math.round(memUsage.rss / 1024 / 1024)}MB`);
+}, 60000);
+
+// Initialize the browser when the server starts
+let serverBrowser;
+(async () => {
+  try {
+    console.log('Pre-initializing browser on server startup...');
+    serverBrowser = await initBrowser();
+    console.log('Browser pre-initialization successful');
+  } catch (error) {
+    console.error('Error pre-initializing browser:', error);
+  }
+})();
 
 // Replace both health endpoints with this single one
 app.get('/health', async (req, res) => {
@@ -842,5 +860,22 @@ app.get('/health', async (req, res) => {
       heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`
     },
     browser: browserStatus
+  });
+});
+
+// Add this near your other test endpoints
+app.get('/status', (req, res) => {
+  const memoryUsage = process.memoryUsage();
+  const memoryUsageMB = Math.round(memoryUsage.rss / 1024 / 1024);
+  
+  res.status(200).json({
+    status: 'online',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: {
+      rss: `${memoryUsageMB}MB`
+    },
+    environment: process.env.NODE_ENV || 'development',
+    puppeteerArgs: process.env.PUPPETEER_ARGS || 'default'
   });
 });

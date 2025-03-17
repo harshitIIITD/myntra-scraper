@@ -1,10 +1,10 @@
 services:
   - type: web
     name: myntra-scraper
-    env: docker
-    dockerfilePath: ./docker-compose.Dockerfile  # Explicitly specify the path
-    plan: starter
-    healthCheckPath: /health
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health  # Make sure this matches your health endpoint
     envVars:
       - key: NODE_ENV
         value: production

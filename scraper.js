@@ -930,21 +930,3 @@ process.on('unhandledRejection', async (reason) => {
   // Don't exit process as this might be in a container environment
 });
 
-// Add to server.js
-// Memory monitoring
-setInterval(() => {
-  const memUsage = process.memoryUsage();
-  console.log(`Memory usage: ${Math.round(memUsage.rss / 1024 / 1024)}MB`);
-}, 60000);
-
-// Initialize the browser when the server starts
-let serverBrowser;
-(async () => {
-  try {
-    console.log('Pre-initializing browser on server startup...');
-    serverBrowser = await initBrowser();
-    console.log('Browser pre-initialization successful');
-  } catch (error) {
-    console.error('Error pre-initializing browser:', error);
-  }
-})();
