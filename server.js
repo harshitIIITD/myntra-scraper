@@ -92,7 +92,7 @@ app.get('/api/scrape', async (req, res) => {
   }
 });
 
-// Update the POST API endpoint for scraping
+// Update the POST API endpoint for scraping to use a longer timeout
 app.post('/api/scrape', async (req, res) => {
   const { url, website = 'myntra' } = req.body;
   
@@ -106,9 +106,9 @@ app.post('/api/scrape', async (req, res) => {
   try {
     console.log(`Received POST request to scrape ${website} URL: ${url}`);
     
-    // Add timeout to see if request is hanging
+    // Increase the timeout to 180 seconds (3 minutes)
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout after 60s')), 60000)
+      setTimeout(() => reject(new Error('Request timeout after 180s')), 180000)
     );
     
     // Choose the appropriate scraping function based on website
@@ -126,7 +126,7 @@ app.post('/api/scrape', async (req, res) => {
         scrapingFunction = scrapeMyntraProductWithHistory;
     }
     
-    // Race against timeout
+    // Race against timeout with a longer timeout
     const result = await Promise.race([
       scrapingFunction(url),
       timeoutPromise

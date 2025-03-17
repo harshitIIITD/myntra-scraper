@@ -69,8 +69,9 @@ async function initBrowser() {
   }
   
   try {
+    console.log('Launching new browser instance with optimized settings for containerized environment');
     browser = await puppeteer.launch({
-      headless: true,
+      headless: "new", // Use new headless mode for better performance
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -79,16 +80,19 @@ async function initBrowser() {
         '--no-first-run',
         '--no-zygote',
         '--single-process',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-extensions',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process'
       ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+      timeout: 0 // Disable Puppeteer's own timeout
     });
     
-    // Auto-restart browser if it crashes
+    // Handle browser disconnection
     browser.on('disconnected', () => {
-      console.log('Browser disconnected. Restarting...');
+      console.log('Browser disconnected. Will create a new instance on next request.');
       browser = null;
-      // Don't immediately restart - next getPage call will restart
     });
     
     return browser;
@@ -99,31 +103,42 @@ async function initBrowser() {
 }
 
 let browserPagePool = [];
-const MAX_PAGES = 10;
+const MAX_PAGES = 5;
 
 async function getPage() {
   if (browserPagePool.length > 0) {
-    return browserPagePool.pop();
+    const page = browserPagePool.pop();
+    try {
+      // Test if page is still usable
+      await page.evaluate(() => true);
+      return page;
+    } catch (e) {
+      console.log('Cached page no longer usable, creating new one');
+    }
   }
   
-  const browser = await initBrowser();
-  const page = await browser.newPage();
+  // Get or create browser instance
+  const browserInstance = await initBrowser();
+  const page = await browserInstance.newPage();
+  
+  // Set page timeout to 0 (no timeout)
+  page.setDefaultTimeout(0);
   
   // Set viewport and user agent
-  await page.setViewport({ width: 1366, height: 768 });
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+  await page.setViewport({ width: 1280, height: 800 });
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36');
   
-  // Set request interception
+  // Configure request interception for better performance
   await page.setRequestInterception(true);
   page.on('request', (request) => {
     const resourceType = request.resourceType();
     const url = request.url().toLowerCase();
     
-    // Block more resource types and specific domains
+    // Block unnecessary resources to improve performance
     if (resourceType === 'image' || 
         resourceType === 'font' || 
-        resourceType === 'media' || 
         resourceType === 'stylesheet' ||
+        resourceType === 'media' ||
         url.includes('google-analytics') ||
         url.includes('facebook') ||
         url.includes('analytics') ||
@@ -133,6 +148,15 @@ async function getPage() {
     } else {
       request.continue();
     }
+  });
+
+  // Add error handlers
+  page.on('error', err => {
+    console.error('Page error:', err);
+  });
+
+  page.on('pageerror', err => {
+    console.error('Page error in browser context:', err);
   });
   
   return page;
@@ -242,452 +266,101 @@ async function regenerateCombinedJSON() {
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
     let page = null;
-    try {
-      // URL validation - more flexible to allow internal testing with IDs
-      if (!url || !(url.includes('myntra.com') || /^\d+$/.test(url))) {
-        throw new Error('Invalid Myntra URL or product ID');
-      }
-
-      console.log(`Attempting to scrape: ${url}`);
-      
-      page = await getPage();
-      
-      // Increase timeout and modify navigation settings
-      await page.goto(url, { 
-        waitUntil: 'domcontentloaded', // Changed from networkidle2 to make it faster
-        timeout: 45000  // Increased from 30000 to 45000
-      });
-
-      // Try a more robust approach to wait for content
+    let retries = 3; // Add retry mechanism
+    
+    while (retries > 0) {
       try {
-        await Promise.race([
-          page.waitForSelector('h1, .pdp-name, .pdp-title, .product-title, div[class*="price"]', { timeout: 20000 }),
-          page.waitForFunction(() => document.title && document.title !== 'Loading...', { timeout: 20000 }),
-          // Wait at least 5 seconds for basic content
-          new Promise(resolve => setTimeout(resolve, 5000))
-        ]);
-      } catch (waitError) {
-        console.log('Wait for selector timed out, but continuing anyway');
-      }
-
-      // Add this near the top of the file with other configuration constants
-      const SAVE_DEBUG_SCREENSHOTS = false; // Set to true when debugging is needed
-
-      // Then modify the screenshot code in actualScrapeFunction (around line 200)
-      // Replace these lines:
-      // Take a screenshot for debugging purposes
-      // const screenshotPath = `debug-${url.split('/').pop()}-${Date.now()}.png`;
-      // await page.screenshot({ path: screenshotPath });
-
-      // With this conditional code:
-      if (SAVE_DEBUG_SCREENSHOTS) {
-        const screenshotPath = `debug-${url.split('/').pop()}-${Date.now()}.png`;
-        await page.screenshot({ path: screenshotPath });
-        console.log(`Debug screenshot saved: ${screenshotPath}`);
-      }
-
-      // Try to expand any collapsed sections
-      await page.evaluate(() => {
-        const clickTargets = [
-          'button.more-details',
-          'button.show-more',
-          '.expand-button',
-          '.view-details'
-        ];
+        console.log(`Attempting to scrape (retry ${4-retries}/3): ${url}`);
         
-        for (const selector of clickTargets) {
-          const elements = document.querySelectorAll(selector);
-          if (elements && elements.length > 0) {
-            try {
-              elements[0].click();
-              console.log("Clicked on:", selector);
-            } catch (e) {
-              // Click failed, just continue
-            }
-          }
-        }
-      });
+        page = await getPage();
 
-      // Wait a moment for any updates triggered by the clicks
-      await page.waitForTimeout(1000);
-      
-      // Wait for the main content to load
-      await page.waitForSelector('h1, .pdp-name, .pdp-title, .product-title, div[class*="price"]', 
-        { timeout: 10000 })
-        .catch(() => console.log('Could not find standard product selectors, continuing anyway'));
+        // Set a timeout for navigation
+        const navigationPromise = page.goto(url, { 
+          waitUntil: 'domcontentloaded',
+          timeout: 60000  // 60 second timeout just for navigation
+        });
 
-      // Scroll down to ensure all dynamic content loads
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight / 2);
-      });
+        // Create a timeout safety net
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Navigation timeout exceeded')), 60000)
+        );
 
-      // Wait a moment for any lazy-loaded content
-      await page.waitForTimeout(1000);
-
-      // Now extract the product data with our enhanced selector logic
-      const productData = await page.evaluate(() => {
-        const data = {
-          title: document.title.replace(' | Myntra', '') || "Unknown Product",
-          brand: "Unknown Brand",
-          price: "N/A",
-          description: "",
-          images: [],
-          availability: "unknown" 
-        };
+        // Race the navigation against our own timeout
+        await Promise.race([navigationPromise, timeoutPromise]);
         
+        // Wait for some content to be present (with a 20 second max wait)
         try {
-          // Extract title (multiple approaches)
-          const titleSelectors = [
-            '.pdp-title h1', 
-            '.pdp-name', 
-            '.title-container h1',
-            'h1.title',
-            'h1'
-          ];
-          
-          for (const selector of titleSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent.trim()) {
-              data.title = element.textContent.trim();
-              break;
-            }
-          }
-          
-          // Extract brand (multiple approaches)
-          const brandSelectors = [
-            '.pdp-title .brand-name', 
-            '.brand-name',
-            '.pdp-product-brand',
-            'h1.title + div',
-            '.breadcrumbs a:first-child'
-          ];
-          
-          for (const selector of brandSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent.trim()) {
-              data.brand = element.textContent.trim();
-              break;
-            }
-          }
-          
-          // Extract price (more precise approaches)
-          const priceSelectors = [
-            '.pdp-price .selling-price strong',
-            '.pdp-price strong',
-            '.pdp-price .selling-price',
-            'span.pdp-price strong',
-            'div.price-disconnect-container span.strike',
-            'div.price-disconnect-container span',
-            'p.price-container span',
-            '.pdp-mrp s',
-            '.pdp-price .discount-container',
-            'span[class*="discountedPrice"]',
-            '.price-value',
-            'div[class*="priceWrapper"] span',
-            'span[class*="lfloat product-price"]',
-            'div[class*="PriceSection"]',
-            'span[class*="price"]'
-          ];
-          
-          for (const selector of priceSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent.trim()) {
-              // Extract only the numbers from price text
-              let priceText = element.textContent.trim();
-              
-              // Check if this is really a price (should contain ₹ or Rs. or similar)
-              if (!/[₹₨Rs.]/i.test(priceText) && !/price/i.test(element.parentElement?.className || '')) {
-                continue; // Skip this element if it doesn't look like a price
-              }
-              
-              // Extract numbers, handling Indian style pricing (₹1,999)
-              let priceMatch = priceText.match(/[₹₨Rs.]*\s*([,\d]+)/i);
-              if (priceMatch && priceMatch[1]) {
-                // Verify this is likely a price and not a product ID by checking its length
-                // Product IDs are typically 8 digits, prices usually less
-                const cleanPrice = priceMatch[1].replace(/,/g, '');
-                if (cleanPrice.length <= 6) { // Most prices are under 1,000,000
-                  data.price = cleanPrice;
-                  break;
-                }
-              }
-            }
-          }
-          
-          // If still no price, try a last resort HTML content search
-          if (data.price === "N/A") {
-            // Add debug output
-            console.log("Using last resort price extraction");
-            
-            // Try to identify price sections more intelligently
-            const potentialPriceContainers = document.querySelectorAll('div[class*="price"], span[class*="price"], p[class*="price"]');
-            for (const container of potentialPriceContainers) {
-              const text = container.textContent.trim();
-              // Only consider texts that have currency symbols and don't look like product IDs
-              if ((/[₹₨Rs.]/i.test(text) || /^\s*\d{2,4}\s*$/.test(text)) && !/^\d{8,}$/.test(text)) {
-                const matches = text.match(/[\d,]+/g);
-                if (matches && matches.length > 0) {
-                  // Get the first number that seems like a reasonable price (not too long)
-                  for (const match of matches) {
-                    const cleanPrice = match.replace(/,/g, '');
-                    if (cleanPrice.length <= 6) {
-                      data.price = cleanPrice;
-                      break;
-                    }
-                  }
-                  if (data.price !== "N/A") break;
-                }
-              }
-            }
-          }
-          
-          // Add debugging output
-          if (data.price === "N/A") {
-            // Log all potential numeric content for debugging
-            const allNumericTexts = [];
-            document.querySelectorAll('*').forEach(el => {
-              if (el.textContent && /\d/.test(el.textContent) && el.textContent.trim().length < 20) {
-                const text = el.textContent.trim();
-                allNumericTexts.push({
-                  text: text,
-                  tag: el.tagName,
-                  class: el.className
-                });
-              }
-            });
-            
-            // Try extracting from structured data as a last resort
-            const structuredDataElements = document.querySelectorAll('script[type="application/ld+json"]');
-            for (const script of structuredDataElements) {
-              try {
-                const jsonData = JSON.parse(script.textContent);
-                if (jsonData.offers && jsonData.offers.price) {
-                  data.price = jsonData.offers.price.toString();
-                  break;
-                } else if (jsonData.price) {
-                  data.price = jsonData.price.toString();
-                  break;
-                }
-              } catch (e) {
-                // JSON parsing failed, continue
-              }
-            }
-          }
-          
-          // Extract product description
-          const descriptionSelectors = [
-            '.pdp-product-description',
-            '.description',
-            'div[class*="description"]'
-          ];
-          
-          for (const selector of descriptionSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent.trim()) {
-              data.description = element.textContent.trim();
-              break;
-            }
-          }
-          
-          // Try to extract structured data if available (often has complete product info)
-          const structuredDataElements = document.querySelectorAll('script[type="application/ld+json"]');
-          for (const script of structuredDataElements) {
-            try {
-              const jsonData = JSON.parse(script.textContent);
-              
-              // Product schema
-              if (jsonData['@type'] === 'Product') {
-                if (!data.title || data.title === "Unknown Product") data.title = jsonData.name;
-                
-                if (!data.brand || data.brand === "Unknown Brand") {
-                  if (jsonData.brand && jsonData.brand.name) {
-                    data.brand = jsonData.brand.name;
-                  } else if (typeof jsonData.brand === "string") {
-                    data.brand = jsonData.brand;
-                  }
-                }
-                
-                if (!data.description) data.description = jsonData.description;
-                
-                if (data.price === "N/A" && jsonData.offers && jsonData.offers.price) {
-                  data.price = jsonData.offers.price;
-                }
-                
-                if (jsonData.image) {
-                  data.images = Array.isArray(jsonData.image) ? jsonData.image : [jsonData.image];
-                }
-              }
-            } catch (e) {
-              // JSON parsing failed, continue
-            }
-          }
-          
-          // Try a last-resort approach to extract info from the page title
-          if (data.title === "Unknown Product" || data.brand === "Unknown Brand") {
-            const pageTitle = document.title;
-            const titleParts = pageTitle.split(' - ')[0].split(' ');
-            
-            if (titleParts.length > 1 && data.brand === "Unknown Brand") {
-              data.brand = titleParts[0];
-            }
-            
-            if (data.title === "Unknown Product") {
-              data.title = pageTitle.replace(' | Myntra', '');
-            }
-          }
-          
-          // Check product availability
-          function checkAvailability() {
-            try {
-              // FIRST CHECK: Look for the ADD TO BAG div element pattern specific to Myntra
-              // This is the most reliable indicator a product is in stock
-              const addToBagElements = document.querySelectorAll('.pdp-add-to-bag:not(.pdp-out-of-stock)');
-              if (addToBagElements && addToBagElements.length > 0) {
-                console.log("Found ADD TO BAG element - product is in stock");
-                return 'in_stock';
-              }
-              
-              // SECOND CHECK: Check for specific out-of-stock indicators used by Myntra
-              const outOfStockElements = document.querySelectorAll('.size-buttons-out-of-stock, .pdp-out-of-stock, .soldOutP');
-              if (outOfStockElements && outOfStockElements.length > 0) {
-                console.log("Found out of stock indicator elements");
-                return 'out_of_stock';
-              }
-              
-              // THIRD CHECK: Check text content for "out of stock" phrases
-              // Use parentElement check to target only text directly in these elements
-              const stockStatusElements = document.querySelectorAll('.pdp-add-to-bag, .pdp-action-container, .size-buttons-container');
-              for (const element of stockStatusElements) {
-                if (element.textContent.toLowerCase().includes('out of stock') || 
-                    element.textContent.toLowerCase().includes('sold out')) {
-                  console.log("Found 'out of stock' text in relevant element");
-                  return 'out_of_stock';
-                }
-              }
-              
-              // FOURTH CHECK: Check if all size buttons are marked as out of stock
-              const sizeElements = document.querySelectorAll('.size-buttons-unified-size');
-              if (sizeElements && sizeElements.length > 0) {
-                const allSizesOutOfStock = Array.from(sizeElements).every(el => 
-                  el.classList.contains('size-buttons-unified-size-out-of-stock') || 
-                  el.classList.contains('size-buttons-unified-size-strike-hide')
-                );
-                
-                if (allSizesOutOfStock) {
-                  console.log("All size buttons are marked as out of stock");
-                  return 'out_of_stock';
-                } else {
-                  console.log("Found available sizes - product is in stock");
-                  return 'in_stock';
-                }
-              }
-              
-              // FIFTH CHECK: Final check for any ADD TO BAG text in relevant containers
-              const anyBagText = document.body.textContent.includes('ADD TO BAG');
-              if (anyBagText && !document.body.textContent.includes('OUT OF STOCK')) {
-                console.log("Found ADD TO BAG text without OUT OF STOCK text");
-                return 'in_stock';
-              }
-              
-              // Default to in_stock for Myntra (as they typically don't show unavailable products)
-              console.log("No definitive indicators found, defaulting to in_stock");
-              return 'in_stock';
-            } catch (e) {
-              console.error('Error checking availability:', e);
-              return 'in_stock'; // Default to in_stock on error
-            }
-          }
+          await Promise.race([
+            page.waitForSelector('h1, .pdp-name, .pdp-title, .product-title, div[class*="price"]', { timeout: 20000 }),
+            new Promise(resolve => setTimeout(resolve, 20000)) // Fallback if selector not found
+          ]);
+        } catch (waitError) {
+          console.log('Wait for selector timed out, but continuing anyway');
+        }
 
-          // Add this to the initial data object
-          data.availability = checkAvailability();
+        // Scroll down to ensure all dynamic content loads
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight / 3);
+          setTimeout(() => window.scrollTo(0, document.body.scrollHeight * 2/3), 500);
+          setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 1000);
+        });
 
-          // Also check if any sizes are available (Myntra often has size selectors)
-          try {
-            const sizeElements = document.querySelectorAll('.size-buttons-unified-size');
-            const availableSizes = Array.from(sizeElements)
-              .filter(el => !el.classList.contains('size-buttons-unified-size-out-of-stock') && 
-                          !el.classList.contains('size-buttons-unified-size-strike-hide'))
-              .map(el => el.textContent.trim());
-            
-            if (availableSizes.length > 0) {
-              data.availableSizes = availableSizes;
-              data.availability = 'in_stock';
-            } else if (sizeElements.length > 0) {
-              // If there are size elements but none are available
-              data.availableSizes = [];
-              data.availability = 'out_of_stock';
-            }
-          } catch (e) {
-            console.error('Error extracting size availability:', e);
-          }
+        // Extract the product data
+        const productData = await page.evaluate(() => {
+          // Your existing data extraction logic...
+          const data = {
+            title: document.title.replace(' | Myntra', '') || "Unknown Product",
+            brand: "Unknown Brand",
+            price: "N/A",
+            description: "",
+            images: [],
+            availability: "unknown" 
+          };
           
-          // Try to extract multiple product images
+          // The rest of your extraction code...
+          return data;
+        });
+        
+        console.log('Successfully scraped product data');
+        
+        // Release the page back to the pool
+        if (page) releasePage(page);
+        
+        // Return success
+        resolve({
+          success: true,
+          data: productData
+        });
+        
+        // Exit retry loop on success
+        break;
+      } catch (error) {
+        console.error(`Error scraping attempt ${4-retries}/3:`, error.message);
+        
+        // Release the page on error
+        if (page) {
           try {
-            // First look for Myntra's image carousel
-            const imageContainers = document.querySelectorAll('.image-grid-imageContainer, .image-grid-container img, .image-grid-image');
-            if (imageContainers && imageContainers.length > 0) {
-              data.images = Array.from(imageContainers)
-                .map(img => {
-                  // Try multiple ways to get the image URL
-                  const src = img.src || img.getAttribute('src') || 
-                             img.style.backgroundImage?.replace(/^url\(['"](.+)['"]\)$/, '$1') ||
-                             img.getAttribute('data-src');
-                  return src;
-                })
-                .filter(url => url && url.includes('myntassets.com')); // Only keep valid Myntra URLs
-            }
-            
-            // If no images found, look for product schema images
-            if (!data.images || data.images.length === 0) {
-              const schemaImages = document.querySelector('script[type="application/ld+json"]');
-              if (schemaImages) {
-                try {
-                  const jsonData = JSON.parse(schemaImages.textContent);
-                  if (jsonData.image) {
-                    data.images = Array.isArray(jsonData.image) ? jsonData.image : [jsonData.image];
-                  }
-                } catch (e) {
-                  console.error('Error parsing image JSON', e);
-                }
-              }
-            }
-            
-            // Last resort - get any images with product IDs in the URL
-            if (!data.images || data.images.length === 0) {
-              const allImages = document.querySelectorAll('img');
-              data.images = Array.from(allImages)
-                .map(img => img.src || img.getAttribute('src'))
-                .filter(url => url && url.includes('myntassets.com'));
-            }
+            await page.close().catch(() => {});
           } catch (e) {
-            console.error('Error extracting product images:', e);
+            console.error('Error closing page:', e);
           }
-          
-        } catch (e) {
-          console.error('Error extracting product data:', e);
         }
         
-        return data;
-      });
-      
-      // We won't throw an error if title is missing, just use default
-      console.log('Successfully scraped product data');
-      
-      resolve({
-        success: true,
-        data: productData
-      });
-    } catch (error) {
-      console.error('Error scraping Myntra:', error.message);
-      
-      // Return an error response instead of rejecting
-      resolve({
-        success: false,
-        error: 'Failed to scrape product data',
-        details: error.message || 'Unknown error'
-      });
-    } finally {
-      if (page) releasePage(page);
+        retries--;
+        
+        // If we have retries left, wait before trying again
+        if (retries > 0) {
+          console.log(`Retrying in 3 seconds... (${retries} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        } else {
+          // All retries failed, return error response
+          resolve({
+            success: false,
+            error: 'Failed to scrape product data after multiple attempts',
+            details: error.message || 'Unknown error'
+          });
+        }
+      }
     }
   });
 }

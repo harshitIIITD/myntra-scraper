@@ -959,6 +959,43 @@
         #csv-progress {
             animation: pulse 1.5s infinite;
         }
+
+        .loading-spinner {
+          border: 4px solid rgba(255, 63, 108, 0.1);
+          border-radius: 50%;
+          border-top: 4px solid #ff3f6c;
+          width: 30px;
+          height: 30px;
+          animation: spin 1s linear infinite;
+          margin: 15px auto;
+        }
+        
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        .progress-bar-container {
+          width: 80%;
+          height: 8px;
+          background-color: #f0f0f0;
+          border-radius: 4px;
+          margin: 15px auto;
+          overflow: hidden;
+        }
+        
+        .progress-bar {
+          height: 100%;
+          width: 0%;
+          background-color: #ff3f6c;
+          transition: width 0.5s ease;
+        }
+        
+        .loading-message {
+          font-size: 14px;
+          color: #666;
+          margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -989,7 +1026,14 @@
             </div>
             <button id="scrapeBtn">Scrape Product</button>
             
-            <div id="loading">Scraping product data... This may take up to 30 seconds.</div>
+            <div id="loading">
+              Scraping product data... This may take up to 3 minutes in cloud environments. Please be patient.
+              <div class="loading-spinner"></div>
+              <div class="progress-bar-container">
+                <div id="loadingProgress" class="progress-bar"></div>
+              </div>
+              <div id="loadingMessage" class="loading-message">Initializing scraper...</div>
+            </div>
             <div id="result"></div>
             <div id="advanced-analysis" class="data-analysis" style="display:none;">
                 <h2>Advanced Product Analysis</h2>
@@ -1812,6 +1856,9 @@
             result.style.display = 'none';
             document.getElementById('advanced-analysis').style.display = 'none';
             
+            // Start the progress animation
+            const loadingInterval = updateLoadingProgress();
+            
             try {
                 // Include website in the request body
                 const response = await fetch('/api/scrape', {
@@ -2083,6 +2130,45 @@
             .catch(error => {
               console.error('Error updating state with new search:', error);
             });
+        }
+
+        // Add this to your existing JavaScript code
+        function updateLoadingProgress() {
+          const loadingProgress = document.getElementById('loadingProgress');
+          const loadingMessage = document.getElementById('loadingMessage');
+          const messages = [
+            "Initializing scraper...",
+            "Connecting to website...",
+            "Processing page content...",
+            "Extracting product details...",
+            "Almost there... finalizing data",
+            "This is taking longer than expected, please be patient..."
+          ];
+          
+          let progress = 0;
+          let messageIndex = 0;
+          
+          const interval = setInterval(() => {
+            // Update progress gradually
+            if (progress < 95) {
+              // Move faster at first, then slower
+              const increment = progress < 70 ? 
+                Math.random() * 5 + 1 : 
+                Math.random() * 0.5 + 0.1;
+                
+              progress += increment;
+              loadingProgress.style.width = `${progress}%`;
+              
+              // Update message occasionally
+              if (progress > messageIndex * 20 && messageIndex < messages.length) {
+                loadingMessage.textContent = messages[messageIndex];
+                messageIndex++;
+              }
+            }
+          }, 800);
+          
+          // Return the interval ID so it can be cleared when loading completes
+          return interval;
         }
     </script>
 </body>
