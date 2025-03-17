@@ -30,7 +30,6 @@ RUN apt-get update && apt-get install -y \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 # Add these crucial environment variables for Puppeteer in containerized environments
-ENV PUPPETEER_ARGS="--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-accelerated-2d-canvas,--no-first-run,--no-zygote,--single-process,--disable-gpu"
 
 # Create cache directory with proper permissions
 RUN mkdir -p /app/cache /app/price-history /app/uploads /app/user-state /app/logs \
