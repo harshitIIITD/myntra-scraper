@@ -273,6 +273,11 @@ async function regenerateCombinedJSON() {
   return generateCombinedProductsJSON();
 }
 
+// Add this function to the top of your actualScrapeFunction to improve debugging
+function logScrapingInfo(message, url) {
+  console.log(`[${new Date().toISOString()}] [Scraping] ${message} - ${url}`);
+}
+
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
     let page = null;
@@ -280,7 +285,7 @@ function actualScrapeFunction(url) {
     
     while (retries > 0) {
       try {
-        console.log(`Attempting to scrape (retry ${5-retries}/4): ${url}`);
+        logScrapingInfo(`Attempting to scrape (retry ${5-retries}/4)`, url);
         
         page = await getPage();
         
@@ -288,10 +293,10 @@ function actualScrapeFunction(url) {
         const randomSleep = Math.floor(Math.random() * 1000) + 500;
         await new Promise(r => setTimeout(r, randomSleep));
         
+        logScrapingInfo("Setting up page with anti-detection measures", url);
+        
         // First try with JavaScript enabled (to handle dynamic websites better)
         await page.setJavaScriptEnabled(true);
-        
-        console.log("Navigating with JavaScript enabled");
         
         // Add more evasion techniques
         await page.evaluateOnNewDocument(() => {
@@ -324,17 +329,26 @@ function actualScrapeFunction(url) {
           };
         });
         
+        // Set a shorter hard timeout for the entire scraping operation
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('Internal scraper timeout after 60s'));
+          }, 60000);
+        });
+        
         // Add some randomness to navigation options
         const waitUntilOptions = ['domcontentloaded', 'networkidle2'];
         const selectedWaitOption = waitUntilOptions[Math.floor(Math.random() * waitUntilOptions.length)];
         
-        console.log(`Navigation started with ${selectedWaitOption} wait option...`);
+        logScrapingInfo(`Navigation started with ${selectedWaitOption} wait option`, url);
         
-        // Navigate with a shorter timeout for initial navigation
-        const response = await page.goto(url, { 
+        // Wrap navigation in a race with timeout
+        const navigationPromise = page.goto(url, { 
           waitUntil: selectedWaitOption, 
-          timeout: 40000 // 40 second timeout for navigation
+          timeout: 20000 // 20 second timeout for navigation
         });
+        
+        const response = await Promise.race([navigationPromise, timeoutPromise]);
         
         if (!response) {
           throw new Error('No response received from page');
@@ -345,11 +359,18 @@ function actualScrapeFunction(url) {
           throw new Error(`Received HTTP ${response.status()} status code`);
         }
         
-        // Wait a bit for JavaScript to execute and check for captchas/blocks
-        await page.waitForTimeout(2000);
+        logScrapingInfo("Page loaded successfully, waiting for content", url);
         
-        // Simulate human-like behavior with more randomness
-        await simulateHumanBehavior(page);
+        // Wait a bit for JavaScript to execute and check for captchas/blocks
+        await page.waitForTimeout(1000);
+        
+        // Simulate more minimal human-like behavior to reduce execution time
+        await page.evaluate(() => {
+          window.scrollBy(0, 500);
+          setTimeout(() => window.scrollBy(0, 300), 300);
+        });
+        
+        await page.waitForTimeout(500);
         
         // Check if page contains content
         const pageContent = await page.content();
@@ -363,91 +384,35 @@ function actualScrapeFunction(url) {
           throw new Error('Bot protection detected in page title');
         }
         
-        console.log("Extracting product data");
+        logScrapingInfo("Extracting product data", url);
         
-        // Try to extract the product data with a timeout
-        const extractPromise = page.evaluate(() => {
-          // Helper function
+        // Simplify data extraction to focus only on essential fields
+        const productData = await page.evaluate(() => {
           const getTextContent = (selector) => {
             const el = document.querySelector(selector);
             return el ? el.textContent.trim() : '';
           };
           
-          // More comprehensive selector list
-          const data = {
+          return {
             title: document.title.replace(' | Myntra', '').trim() || 
                    getTextContent('.pdp-name') || 
                    getTextContent('h1.title') || 
                    "Unknown Product",
             brand: getTextContent('.pdp-title .pdp-name') || 
                    getTextContent('.brand-name') || 
-                   getTextContent('h1.brand') ||
                    getTextContent('.pdp-title') ||
                    "Unknown Brand",
             price: getTextContent('.pdp-price') || 
                    getTextContent('.pdp-discount-container') || 
                    getTextContent('.pdp-mrp') || 
-                   getTextContent('.price-container') || 
                    getTextContent('.price') || "N/A",
-            description: getTextContent('.pdp-product-description') || 
-                         getTextContent('.pdp-product-description-content') || 
-                         getTextContent('.pdp-sizeFitDesc') || "",
+            description: getTextContent('.pdp-product-description') || "",
             images: [],
-            availability: "in_stock" // Default to in_stock
+            availability: document.body.textContent.includes('OUT OF STOCK') ? 'out_of_stock' : 'in_stock'
           };
-          
-          // Get images - try different selector patterns
-          const selectors = ['img.image-grid-image', 'img.image-grid-imageV2', '.image-grid-container img', '.common-image-container img'];
-          for (const selector of selectors) {
-            const imgElements = document.querySelectorAll(selector);
-            if (imgElements && imgElements.length > 0) {
-              data.images = Array.from(imgElements)
-                .map(img => img.src)
-                .filter(src => src && src.includes('myntra.com'))
-                .slice(0, 5);
-              break;
-            }
-          }
-          
-          // If no images found with specific selectors, try generic img tags
-          if (data.images.length === 0) {
-            const imgElements = document.querySelectorAll('img');
-            if (imgElements && imgElements.length > 0) {
-              data.images = Array.from(imgElements)
-                .filter(img => img.src && img.src.includes('myntra.com') && img.width > 100)
-                .map(img => img.src)
-                .slice(0, 5);
-            }
-          }
-          
-          // Extract available sizes
-          data.availableSizes = [];
-          const sizeElements = document.querySelectorAll('.size-buttons-size-button:not(.size-buttons-size-button-disabled), .size-buttons-unified-size:not(.size-buttons-out-of-stock)');
-          if (sizeElements && sizeElements.length > 0) {
-            data.availableSizes = Array.from(sizeElements)
-              .map(el => el.textContent.trim())
-              .filter(size => size);
-          }
-          
-          // Comprehensive availability check
-          if (document.body.textContent.includes('OUT OF STOCK') || 
-              document.body.textContent.includes('SOLD OUT') ||
-              document.body.textContent.includes('out of stock') ||
-              document.body.textContent.includes('sold out')) {
-            data.availability = 'out_of_stock';
-          }
-          
-          return data;
         });
         
-        // Set a timeout for data extraction
-        const extractTimeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Data extraction timeout')), 30000)
-        );
-        
-        const productData = await Promise.race([extractPromise, extractTimeoutPromise]);
-        
-        console.log('Successfully extracted product data');
+        logScrapingInfo("Successfully extracted product data, cleaning up", url);
         
         // Release the page back to the pool
         releasePage(page);
@@ -462,7 +427,7 @@ function actualScrapeFunction(url) {
         // Exit retry loop on success
         break;
       } catch (error) {
-        console.error(`Error scraping attempt ${5-retries}/4:`, error.message);
+        console.error(`Error scraping attempt ${5-retries}/4: ${error.message}`);
         
         // Clean up page on error
         if (page) {
@@ -479,7 +444,7 @@ function actualScrapeFunction(url) {
         // If we have retries left, wait before trying again with increasing delays
         if (retries > 0) {
           const waitTime = (5 - retries) * 3000; // Progressive backoff
-          console.log(`Retrying in ${waitTime/1000} seconds... (${retries} attempts left)`);
+          logScrapingInfo(`Retrying in ${waitTime/1000} seconds (${retries} attempts left)`, url);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         } else {
           // All retries failed, return error response
@@ -914,13 +879,55 @@ function actualScrapeFlipkartFunction(url) {
   });
 }
 
+// Add this function to help manage browser resources
+async function closeBrowsers() {
+  try {
+    console.log('Closing all browser instances...');
+    if (browser) {
+      await browser.close().catch(err => console.error('Error closing main browser:', err));
+      browser = null;
+    }
+    
+    // Also close any browsers in the pool
+    for (const pooledBrowser of browserPool) {
+      try {
+        await pooledBrowser.close().catch(err => console.error('Error closing pooled browser:', err));
+      } catch (e) {
+        console.error('Error closing pooled browser:', e);
+      }
+    }
+    
+    // Clear the pool
+    browserPool.length = 0;
+    
+    console.log('All browser instances closed');
+  } catch (error) {
+    console.error('Error closing browsers:', error);
+  }
+}
+
 // Update the exports
 module.exports = {
   scrapeMyntraProduct,
   scrapeAmazonProduct,
   scrapeFlipkartProduct,
-  regenerateCombinedJSON
+  regenerateCombinedJSON,
+  closeBrowsers
 };
+
+// Add an event handler for uncaught exceptions to clean up resources
+process.on('uncaughtException', async (err) => {
+  console.error('Uncaught exception:', err);
+  await closeBrowsers();
+  // Don't exit process as this might be in a container environment
+});
+
+// Add an event handler for unhandled rejections to clean up resources
+process.on('unhandledRejection', async (reason) => {
+  console.error('Unhandled rejection:', reason);
+  await closeBrowsers();
+  // Don't exit process as this might be in a container environment
+});
 
 // Add to server.js
 // Memory monitoring

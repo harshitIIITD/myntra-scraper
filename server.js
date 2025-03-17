@@ -92,7 +92,7 @@ app.get('/api/scrape', async (req, res) => {
   }
 });
 
-// Update the POST API endpoint for scraping to use a longer timeout
+// Update the POST API endpoint for scraping to use a different timeout approach
 app.post('/api/scrape', async (req, res) => {
   const { url, website = 'myntra' } = req.body;
   
@@ -103,17 +103,22 @@ app.post('/api/scrape', async (req, res) => {
     });
   }
 
+  // Add a special abort controller that can be used to abort the fetch operations
+  const controller = new AbortController();
+  const signal = controller.signal;
+  
+  // Set a timeout that will abort the operation
+  const timeoutId = setTimeout(() => {
+    console.log('Scraping operation taking too long, aborting...');
+    controller.abort();
+  }, 240000); // 4 minutes
+
   try {
     console.log(`Received POST request to scrape ${website} URL: ${url}`);
     
-    // Extend timeout to 5 minutes (300 seconds)
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout after 300s')), 300000)
-    );
-    
-    // Explicitly increase Node.js server timeout to slightly longer than our promise timeout
-    req.socket.setTimeout(310000);
-    res.setTimeout(310000);
+    // Explicitly increase Node.js server timeout
+    req.socket.setTimeout(250000);
+    res.setTimeout(250000);
     
     // Choose the appropriate scraping function based on website
     let scrapingFunction;
@@ -126,22 +131,21 @@ app.post('/api/scrape', async (req, res) => {
         break;
       case 'myntra':
       default:
-        // Use the wrapper function for Myntra
-        scrapingFunction = scrapeMyntraProductWithHistory;
+        // Use the wrapper function for Myntra with streamlined operation
+        scrapingFunction = url => scrapeMyntraProductWithRobustTimeout(url, signal);
     }
     
-    // Add progress tracking with multiple notifications
-    let scrapeTimer = setInterval(() => {
-      console.log(`Scraping in progress - ${new Date().toISOString()}`);
-    }, 30000); // Log every 30 seconds
+    // Progress logging
+    const progressInterval = setInterval(() => {
+      console.log(`[${new Date().toISOString()}] Scraping in progress for ${url}`);
+    }, 10000); // Log every 10 seconds for better debugging
     
-    // Race against timeout
-    const result = await Promise.race([
-      scrapingFunction(url),
-      timeoutPromise
-    ]).finally(() => {
-      clearInterval(scrapeTimer); // Use clearInterval instead of clearTimeout
-    });
+    // Execute the scraping function
+    const result = await scrapingFunction(url);
+    
+    // Clean up
+    clearTimeout(timeoutId);
+    clearInterval(progressInterval);
     
     // Ensure a valid response even if result is somehow undefined
     if (!result) {
@@ -150,7 +154,20 @@ app.post('/api/scrape', async (req, res) => {
     
     return res.json(result);
   } catch (error) {
+    // Clean up
+    clearTimeout(timeoutId);
+    
     console.error('Error in API endpoint:', error);
+    
+    // Check if it was an abort error
+    if (error.name === 'AbortError') {
+      return res.status(500).json({
+        success: false,
+        error: 'Scraping operation timed out',
+        details: 'The operation took too long to complete'
+      });
+    }
+    
     // Check if headers have already been sent
     if (!res.headersSent) {
       return res.status(500).json({
@@ -163,6 +180,69 @@ app.post('/api/scrape', async (req, res) => {
     }
   }
 });
+
+// Add this wrapper function to add a robust timeout to the scraping operation
+async function scrapeMyntraProductWithRobustTimeout(url, signal) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      console.log(`Starting optimized scrape with robust timeout for: ${url}`);
+      
+      // Set up an internal timeout to prevent hanging
+      const internalTimeoutId = setTimeout(() => {
+        console.log(`Internal timeout reached for ${url}`);
+        resolve({
+          success: false,
+          error: 'Scraping operation timed out internally',
+          details: 'The operation took too long to complete at the browser level'
+        });
+      }, 90000); // 90 seconds internal timeout
+      
+      // Check if abort signal is already triggered
+      if (signal && signal.aborted) {
+        clearTimeout(internalTimeoutId);
+        return resolve({
+          success: false,
+          error: 'Scraping operation aborted',
+          details: 'The operation was aborted by the controller'
+        });
+      }
+      
+      // Set up signal handler
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          clearTimeout(internalTimeoutId);
+          resolve({
+            success: false,
+            error: 'Scraping operation aborted',
+            details: 'The operation was aborted by the controller'
+          });
+        });
+      }
+      
+      // Call the original scrape function
+      try {
+        const result = await scrapeMyntraProduct(url);
+        clearTimeout(internalTimeoutId);
+        resolve(result);
+      } catch (error) {
+        clearTimeout(internalTimeoutId);
+        console.error('Error in scrapeMyntraProductWithRobustTimeout:', error);
+        resolve({
+          success: false,
+          error: 'Failed to complete scraping operation',
+          details: error.message || 'Unknown error'
+        });
+      }
+    } catch (outerError) {
+      console.error('Outer error in scrapeMyntraProductWithRobustTimeout:', outerError);
+      resolve({
+        success: false,
+        error: 'Failed at wrapper level',
+        details: outerError.message || 'Unknown wrapper error'
+      });
+    }
+  });
+}
 
 // Replace your existing /api/upload-csv endpoint with this fixed implementation
 app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
@@ -730,11 +810,35 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Make sure the health check endpoint works properly
-app.get('/health', (req, res) => {
-  // Check memory usage
+// Add a more comprehensive health check endpoint
+app.get('/health', async (req, res) => {
   const memoryUsage = process.memoryUsage();
   const memoryUsageMB = Math.round(memoryUsage.rss / 1024 / 1024);
+  
+  let browserStatus = 'unknown';
+  
+  try {
+    // Check browser health
+    if (browser && browser.process() != null) {
+      browserStatus = 'connected';
+    } else {
+      browserStatus = 'disconnected';
+      
+      // Try to reinitialize the browser
+      console.log('Browser disconnected, attempting to reinitialize...');
+      browser = await initBrowser().catch(err => {
+        console.error('Failed to reinitialize browser:', err);
+        browserStatus = 'failed_to_reinitialize';
+      });
+      
+      if (browser) {
+        browserStatus = 'reinitialized';
+      }
+    }
+  } catch (error) {
+    console.error('Error checking browser health:', error);
+    browserStatus = 'error';
+  }
   
   res.status(200).json({
     status: 'ok',
@@ -744,6 +848,7 @@ app.get('/health', (req, res) => {
       rss: `${memoryUsageMB}MB`,
       heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
       heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`
-    }
+    },
+    browser: browserStatus
   });
 });
