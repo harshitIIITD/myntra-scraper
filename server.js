@@ -188,7 +188,11 @@ async function scrapeMyntraProductWithRobustTimeout(url, signal) {
     try {
       console.log(`Starting optimized scrape with robust timeout for: ${url}`);
       
-      // Set up an internal timeout to prevent hanging
+      // Set up an internal timeout to prevent hanging - use shorter timeout on Render
+      const isRender = process.env.RENDER || process.env.RENDER_EXTERNAL_URL;
+      const timeoutDuration = isRender ? 60000 : 90000; // 60 seconds on Render, 90 elsewhere
+      
+      console.log(`Setting internal timeout of ${timeoutDuration}ms for ${url}`);
       const internalTimeoutId = setTimeout(() => {
         console.log(`Internal timeout reached for ${url}`);
         resolve({
@@ -196,7 +200,7 @@ async function scrapeMyntraProductWithRobustTimeout(url, signal) {
           error: 'Scraping operation timed out internally',
           details: 'The operation took too long to complete at the browser level'
         });
-      }, 90000); // 90 seconds internal timeout
+      }, timeoutDuration);
       
       // Check if abort signal is already triggered
       if (signal && signal.aborted) {

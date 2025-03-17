@@ -58,21 +58,41 @@ async function processQueue() {
 
 // Create a browser instance once
 let browser;
+let browserInitializing = false;
+let browserInitPromise = null;
 
 async function initBrowser() {
+  // If browser exists and is working, return it
   if (browser && browser.process() != null) {
     try {
       return browser;
     } catch (e) {
       console.log('Existing browser disconnected, launching new instance');
+      browser = null;
     }
   }
   
-  try {
-    console.log('Launching new browser instance with optimized settings for containerized environment');
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: [
+  // If another initialization is in progress, wait for it
+  if (browserInitializing && browserInitPromise) {
+    console.log('Browser initialization already in progress, waiting...');
+    try {
+      return await browserInitPromise;
+    } catch (error) {
+      console.error('Error waiting for browser initialization:', error);
+      // Continue with a new initialization
+    }
+  }
+  
+  // Start a new initialization
+  browserInitializing = true;
+  browserInitPromise = (async () => {
+    try {
+      console.log('Launching new browser instance optimized for Render environment');
+    
+      // Check if we're running on Render (common env variable on Render)
+      const isRender = process.env.RENDER || process.env.RENDER_EXTERNAL_URL;
+      
+      const args = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
@@ -82,30 +102,60 @@ async function initBrowser() {
         '--single-process',
         '--disable-gpu',
         '--disable-extensions',
-        '--window-size=1920,1080', // Use larger window size
         '--disable-infobars',
         '--window-position=0,0',
-        '--ignore-certificate-errors', // Fixed typo in certificate
+        '--ignore-certificate-errors',
         '--ignore-certificate-errors-spki-list',
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-web-security',
         '--mute-audio'
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-      timeout: 0
-    });
-    
-    // Handle browser disconnection
-    browser.on('disconnected', () => {
-      console.log('Browser disconnected. Will create a new instance on next request.');
-      browser = null;
-    });
-    
-    return browser;
-  } catch (error) {
-    console.error('Failed to launch browser:', error);
-    throw error;
-  }
+      ];
+      
+      // Add specific optimizations for Render environment
+      if (isRender) {
+        args.push(
+          '--disable-dev-tools',
+          '--disable-software-rasterizer',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--enable-features=NetworkService',
+          '--memory-pressure-off'
+        );
+      } else {
+        // For local development, can use larger window size
+        args.push('--window-size=1920,1080');
+      }
+      
+      browser = await puppeteer.launch({
+        headless: "new",
+        args: args,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+        timeout: 60000, // Set a more reasonable timeout for browser launch
+        // Default timeout was 0 (infinite) which can cause issues on cloud environments
+        ignoreHTTPSErrors: true,
+        handleSIGINT: false, // Let our own handlers manage process signals
+        handleSIGTERM: false,
+        handleSIGHUP: false
+      });
+      
+      // Handle browser disconnection
+      browser.on('disconnected', () => {
+        console.log('Browser disconnected. Will create a new instance on next request.');
+        browser = null;
+      });
+      
+      console.log('Browser instance successfully created');
+      browserInitializing = false;
+      return browser;
+    } catch (error) {
+      browserInitializing = false;
+      console.error('Failed to launch browser:', error);
+      throw error;
+    }
+  })();
+  
+  return browserInitPromise;
 }
 
 let browserPagePool = [];
