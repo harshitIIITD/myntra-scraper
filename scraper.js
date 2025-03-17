@@ -83,7 +83,12 @@ async function initBrowser() {
         '--disable-gpu',
         '--disable-extensions',
         '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process'
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-infobars',
+        '--window-position=0,0',
+        '--ignore-certifcate-errors',
+        '--ignore-certifcate-errors-spki-list',
+        '--mute-audio'
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
       timeout: 0 // Disable Puppeteer's own timeout
@@ -124,29 +129,19 @@ async function getPage() {
   // Set page timeout to 0 (no timeout)
   page.setDefaultTimeout(0);
   
-  // Set viewport and user agent
-  await page.setViewport({ width: 1280, height: 800 });
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36');
+  // Set viewport to a mobile device for faster loading
+  await page.setViewport({ width: 375, height: 667, isMobile: true });
   
-  // Configure request interception for better performance
+  // Set a mobile user agent
+  await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1');
+  
+  // Block ALL resources except document and stylesheet
   await page.setRequestInterception(true);
   page.on('request', (request) => {
-    const resourceType = request.resourceType();
-    const url = request.url().toLowerCase();
-    
-    // Block unnecessary resources to improve performance
-    if (resourceType === 'image' || 
-        resourceType === 'font' || 
-        resourceType === 'stylesheet' ||
-        resourceType === 'media' ||
-        url.includes('google-analytics') ||
-        url.includes('facebook') ||
-        url.includes('analytics') ||
-        url.includes('tracker') ||
-        url.includes('advertisement')) {
-      request.abort();
-    } else {
+    if (request.resourceType() === 'document' || request.resourceType() === 'stylesheet') {
       request.continue();
+    } else {
+      request.abort();
     }
   });
 
@@ -262,7 +257,7 @@ async function regenerateCombinedJSON() {
   return generateCombinedProductsJSON();
 }
 
-// Update the actualScrapeFunction in scraper.js to handle errors more gracefully
+// Update the actualScrapeFunction to better handle Myntra's specific structure and network issues
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
     let page = null;
@@ -274,54 +269,74 @@ function actualScrapeFunction(url) {
         
         page = await getPage();
 
-        // Set a timeout for navigation
+        // Disable JavaScript for faster loading and to bypass some protections
+        await page.setJavaScriptEnabled(false);
+        
+        console.log("JavaScript disabled for faster loading");
+        
+        // Set a more aggressive timeout for navigation
         const navigationPromise = page.goto(url, { 
-          waitUntil: 'domcontentloaded',
-          timeout: 60000  // 60 second timeout just for navigation
+          waitUntil: 'domcontentloaded', // Use domcontentloaded instead of networkidle2
+          timeout: 30000  // 30 second timeout just for navigation
         });
 
+        console.log("Navigation started...");
+        
         // Create a timeout safety net
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Navigation timeout exceeded')), 60000)
+          setTimeout(() => reject(new Error('Navigation timeout exceeded')), 30000)
         );
 
         // Race the navigation against our own timeout
         await Promise.race([navigationPromise, timeoutPromise]);
         
-        // Wait for some content to be present (with a 20 second max wait)
-        try {
-          await Promise.race([
-            page.waitForSelector('h1, .pdp-name, .pdp-title, .product-title, div[class*="price"]', { timeout: 20000 }),
-            new Promise(resolve => setTimeout(resolve, 20000)) // Fallback if selector not found
-          ]);
-        } catch (waitError) {
-          console.log('Wait for selector timed out, but continuing anyway');
-        }
-
-        // Scroll down to ensure all dynamic content loads
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight / 3);
-          setTimeout(() => window.scrollTo(0, document.body.scrollHeight * 2/3), 500);
-          setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 1000);
-        });
-
-        // Extract the product data
+        console.log("Page loaded, extracting data directly without waiting for selectors");
+        
+        // Extract the product data immediately without waiting for selectors
         const productData = await page.evaluate(() => {
-          // Your existing data extraction logic...
-          const data = {
-            title: document.title.replace(' | Myntra', '') || "Unknown Product",
-            brand: "Unknown Brand",
-            price: "N/A",
-            description: "",
-            images: [],
-            availability: "unknown" 
+          // Simple data extraction function that doesn't rely on complex selectors
+          const getTextContent = (selector) => {
+            const el = document.querySelector(selector);
+            return el ? el.textContent.trim() : '';
           };
           
-          // The rest of your extraction code...
+          // Extract basic product info
+          const data = {
+            title: document.title.replace(' | Myntra', '').trim() || "Unknown Product",
+            brand: getTextContent('.pdp-title .pdp-name') || 
+                  getTextContent('.brand-name') || 
+                  getTextContent('h1.brand') || "Unknown Brand",
+            price: getTextContent('.pdp-price') || 
+                  getTextContent('.pdp-mrp') || 
+                  getTextContent('.price-container') || "N/A",
+            description: getTextContent('.pdp-product-description') || 
+                        getTextContent('.pdp-sizeFitDesc') || "",
+            images: [],
+            availability: "in_stock" // Default to in_stock
+          };
+          
+          // Simple image extraction
+          const imgElements = document.querySelectorAll('img');
+          if (imgElements && imgElements.length > 0) {
+            data.images = Array.from(imgElements)
+              .filter(img => img.src && img.src.includes('myntra.com'))
+              .map(img => img.src)
+              .slice(0, 5); // Limit to first 5 images
+          }
+          
+          // Simple availability check
+          if (document.body.textContent.includes('OUT OF STOCK') || 
+              document.body.textContent.includes('SOLD OUT')) {
+            data.availability = 'out_of_stock';
+          }
+          
           return data;
         });
         
-        console.log('Successfully scraped product data');
+        console.log('Successfully extracted basic product data');
+        
+        // Re-enable JavaScript for future page uses
+        await page.setJavaScriptEnabled(true);
         
         // Release the page back to the pool
         if (page) releasePage(page);
@@ -340,6 +355,8 @@ function actualScrapeFunction(url) {
         // Release the page on error
         if (page) {
           try {
+            // Make sure to re-enable JavaScript before returning page to pool
+            await page.setJavaScriptEnabled(true).catch(() => {});
             await page.close().catch(() => {});
           } catch (e) {
             console.error('Error closing page:', e);
