@@ -4,7 +4,7 @@ const path = require('path');
 
 // Add to the top of scraper.js
 const browserPool = [];
-const MAX_BROWSERS = 3;
+const MAX_BROWSERS = 5;
 
 async function getOrCreateBrowser() {
   if (browserPool.length > 0) {
@@ -27,7 +27,7 @@ let isProcessing = false;
 const RATE_LIMIT_DELAY = 200; // 2 seconds between requests
 
 const productCache = new Map();
-const CACHE_TTL = 3600000; // 1 hour in milliseconds
+const CACHE_TTL = 604800000; // 1 hour in milliseconds
 
 async function processQueue() {
   if (isProcessing || scrapingQueue.length === 0) return;
