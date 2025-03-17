@@ -4,7 +4,8 @@ const {
   scrapeMyntraProduct, 
   scrapeAmazonProduct, 
   scrapeFlipkartProduct, 
-  regenerateCombinedJSON 
+  regenerateCombinedJSON,
+  initBrowser // Add this to the import
 } = require('./scraper');
 // Add these imports at the top with your other requires
 const multer = require('multer');
@@ -801,16 +802,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Add this to server.js
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// Add a more comprehensive health check endpoint
+// Replace both health endpoints with this single one
 app.get('/health', async (req, res) => {
   const memoryUsage = process.memoryUsage();
   const memoryUsageMB = Math.round(memoryUsage.rss / 1024 / 1024);

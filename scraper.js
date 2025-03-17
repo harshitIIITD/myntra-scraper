@@ -912,7 +912,8 @@ module.exports = {
   scrapeAmazonProduct,
   scrapeFlipkartProduct,
   regenerateCombinedJSON,
-  closeBrowsers
+  closeBrowsers,
+  initBrowser // Add this
 };
 
 // Add an event handler for uncaught exceptions to clean up resources
@@ -935,3 +936,15 @@ setInterval(() => {
   const memUsage = process.memoryUsage();
   console.log(`Memory usage: ${Math.round(memUsage.rss / 1024 / 1024)}MB`);
 }, 60000);
+
+// Initialize the browser when the server starts
+let serverBrowser;
+(async () => {
+  try {
+    console.log('Pre-initializing browser on server startup...');
+    serverBrowser = await initBrowser();
+    console.log('Browser pre-initialization successful');
+  } catch (error) {
+    console.error('Error pre-initializing browser:', error);
+  }
+})();
