@@ -24,7 +24,7 @@ A web application that scrapes product information from Myntra, Amazon, and Flip
 
 1. Clone the repository or download the source code:
 ```bash
-git clone https://github.com/yourusername/myntra-scraper.git
+git clone https://github.com/harshitIIITD/myntra-scraper.git
 cd myntra-scraper
 ```
 
