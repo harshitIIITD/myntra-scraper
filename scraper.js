@@ -1,23 +1,19 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
+const chromium = require('@sparticuz/chromium');
 
 // Add to the top of scraper.js
 const browserPool = [];
 const MAX_BROWSERS = 5;
 
+// Replace your browser launch function
 async function getOrCreateBrowser() {
-  if (browserPool.length > 0) {
-    return browserPool.pop();
-  }
-  
   return await puppeteer.launch({
-    headless: "new",
-    args: [
-      '--no-sandbox', 
-      '--disable-setuid-sandbox',
-      // ...existing args
-    ]
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 }
 
@@ -62,15 +58,10 @@ let browser;
 async function initBrowser() {
   if (!browser) {
     browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=1920,1080'
-      ],
-      defaultViewport: { width: 1920, height: 1080 }
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
   }
   return browser;
