@@ -293,16 +293,47 @@ function actualScrapeFunction(url) {
         
         console.log("Navigating with JavaScript enabled");
         
+        // Add more evasion techniques
+        await page.evaluateOnNewDocument(() => {
+          // Overwrite the navigator properties to avoid detection
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => false,
+          });
+          
+          // Create a fake plugins array
+          Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5],
+          });
+          
+          // Create a fake languages array
+          Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en'],
+          });
+          
+          // Override permissions
+          const originalQuery = window.navigator.permissions.query;
+          window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+              Promise.resolve({ state: Notification.permission }) :
+              originalQuery(parameters)
+          );
+          
+          // Prevent detection of headless mode
+          window.chrome = {
+            runtime: {},
+          };
+        });
+        
         // Add some randomness to navigation options
         const waitUntilOptions = ['domcontentloaded', 'networkidle2'];
         const selectedWaitOption = waitUntilOptions[Math.floor(Math.random() * waitUntilOptions.length)];
         
         console.log(`Navigation started with ${selectedWaitOption} wait option...`);
         
-        // Navigate with a timeout
+        // Navigate with a shorter timeout for initial navigation
         const response = await page.goto(url, { 
           waitUntil: selectedWaitOption, 
-          timeout: 40000 // 40 second timeout
+          timeout: 40000 // 40 second timeout for navigation
         });
         
         if (!response) {
@@ -317,20 +348,8 @@ function actualScrapeFunction(url) {
         // Wait a bit for JavaScript to execute and check for captchas/blocks
         await page.waitForTimeout(2000);
         
-        // Simulate human-like behavior
-        // Random scrolling
-        await page.evaluate(() => {
-          const randomScrolls = Math.floor(Math.random() * 4) + 2;
-          const scrollHeight = document.body.scrollHeight;
-          
-          for (let i = 0; i < randomScrolls; i++) {
-            const position = Math.floor((i + 1) * scrollHeight / (randomScrolls + 1));
-            window.scrollTo(0, position);
-          }
-        });
-        
-        // Wait a moment
-        await page.waitForTimeout(1000);
+        // Simulate human-like behavior with more randomness
+        await simulateHumanBehavior(page);
         
         // Check if page contains content
         const pageContent = await page.content();
@@ -346,8 +365,8 @@ function actualScrapeFunction(url) {
         
         console.log("Extracting product data");
         
-        // Try to extract the product data
-        const productData = await page.evaluate(() => {
+        // Try to extract the product data with a timeout
+        const extractPromise = page.evaluate(() => {
           // Helper function
           const getTextContent = (selector) => {
             const el = document.querySelector(selector);
@@ -421,6 +440,13 @@ function actualScrapeFunction(url) {
           return data;
         });
         
+        // Set a timeout for data extraction
+        const extractTimeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Data extraction timeout')), 30000)
+        );
+        
+        const productData = await Promise.race([extractPromise, extractTimeoutPromise]);
+        
         console.log('Successfully extracted product data');
         
         // Release the page back to the pool
@@ -452,7 +478,7 @@ function actualScrapeFunction(url) {
         
         // If we have retries left, wait before trying again with increasing delays
         if (retries > 0) {
-          const waitTime = (5 - retries) * 2000; // Progressive backoff
+          const waitTime = (5 - retries) * 3000; // Progressive backoff
           console.log(`Retrying in ${waitTime/1000} seconds... (${retries} attempts left)`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         } else {
@@ -468,6 +494,74 @@ function actualScrapeFunction(url) {
   });
 }
 
+// Add this helper function for human-like behavior
+async function simulateHumanBehavior(page) {
+  try {
+    // Random scrolling
+    await page.evaluate(() => {
+      return new Promise((resolve) => {
+        // Random number of scrolls between 2 and 5
+        const scrollCount = Math.floor(Math.random() * 4) + 2;
+        const scrollHeight = document.body.scrollHeight;
+        let currentScroll = 0;
+        let scrollStep = 0;
+        
+        const scrollInterval = setInterval(() => {
+          // Random scroll step between 100 and 300 pixels
+          scrollStep = Math.floor(Math.random() * 200) + 100;
+          currentScroll += scrollStep;
+          
+          // Scroll down
+          window.scrollBy(0, scrollStep);
+          
+          // Add some random mouse movements (this won't actually move the mouse but can help)
+          if (Math.random() > 0.7) {
+            const mouseEvent = new MouseEvent('mousemove', {
+              'view': window,
+              'bubbles': true,
+              'cancelable': true,
+              'clientX': Math.random() * window.innerWidth,
+              'clientY': Math.random() * window.innerHeight
+            });
+            document.dispatchEvent(mouseEvent);
+          }
+          
+          // If we've scrolled enough or reached bottom, start scrolling back up
+          if (currentScroll >= scrollHeight * 0.7 || scrollCount <= 0) {
+            clearInterval(scrollInterval);
+            
+            // Random timeout before scrolling back up
+            setTimeout(() => {
+              window.scrollTo(0, 0);
+              resolve();
+            }, Math.random() * 1000 + 500);
+          }
+        }, Math.random() * 500 + 300); // Random interval between scrolls
+      });
+    });
+    
+    // Random wait after scrolling
+    await page.waitForTimeout(Math.random() * 1000 + 500);
+    
+    // Sometimes click on a product image (simulates user exploring the product)
+    if (Math.random() > 0.5) {
+      await page.evaluate(() => {
+        const productImages = document.querySelectorAll('.image-grid-image, .image-grid-imageV2, .common-image-container img');
+        if (productImages && productImages.length > 0) {
+          const randomIndex = Math.floor(Math.random() * productImages.length);
+          productImages[randomIndex].click();
+        }
+      });
+      
+      // Wait after clicking
+      await page.waitForTimeout(Math.random() * 1000 + 500);
+    }
+    
+  } catch (error) {
+    console.error('Error during human behavior simulation:', error);
+    // Continue even if simulation fails
+  }
+}
 
 // Replace your existing checkAvailability function with this improved version
 
@@ -541,7 +635,7 @@ async function scrapeMyntraProduct(url) {
     console.log(`Received numeric ID: ${url}, converting to URL`);
     
     // For format /product-name/brand/product-id
-    url = `https://www.myntra.com/products/${url}`;
+    url = `https://www.myntra.com/${url}`;
   } else if (!url.startsWith('http')) {
     // If URL doesn't start with http, assume it's a path and prepend Myntra domain
     url = `https://www.myntra.com/${url}`;

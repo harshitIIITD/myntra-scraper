@@ -106,14 +106,14 @@ app.post('/api/scrape', async (req, res) => {
   try {
     console.log(`Received POST request to scrape ${website} URL: ${url}`);
     
-    // Set longer timeout (4 minutes)
+    // Extend timeout to 5 minutes (300 seconds)
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout after 240s')), 240000)
+      setTimeout(() => reject(new Error('Request timeout after 300s')), 300000)
     );
     
-    // Explicitly increase Node.js server timeout
-    req.socket.setTimeout(250000);
-    res.setTimeout(250000);
+    // Explicitly increase Node.js server timeout to slightly longer than our promise timeout
+    req.socket.setTimeout(310000);
+    res.setTimeout(310000);
     
     // Choose the appropriate scraping function based on website
     let scrapingFunction;
@@ -130,17 +130,17 @@ app.post('/api/scrape', async (req, res) => {
         scrapingFunction = scrapeMyntraProductWithHistory;
     }
     
-    // Add progress tracking
-    let scrapeTimer = setTimeout(() => {
-      console.log('Scraping in progress - 60 seconds elapsed...');
-    }, 60000);
+    // Add progress tracking with multiple notifications
+    let scrapeTimer = setInterval(() => {
+      console.log(`Scraping in progress - ${new Date().toISOString()}`);
+    }, 30000); // Log every 30 seconds
     
     // Race against timeout
     const result = await Promise.race([
       scrapingFunction(url),
       timeoutPromise
     ]).finally(() => {
-      clearTimeout(scrapeTimer);
+      clearInterval(scrapeTimer); // Use clearInterval instead of clearTimeout
     });
     
     // Ensure a valid response even if result is somehow undefined
@@ -631,7 +631,14 @@ const originalScrapeMyntraProduct = scrapeMyntraProduct;
 async function scrapeMyntraProductWithHistory(url) {
   try {
     console.log(`Starting scrape with history tracking for: ${url}`);
-    const result = await originalScrapeMyntraProduct(url);
+    
+    // Add timeout to the scraping function itself
+    const scrapePromise = originalScrapeMyntraProduct(url);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Internal scraper timeout')), 290000)
+    );
+    
+    const result = await Promise.race([scrapePromise, timeoutPromise]);
     
     if (result && result.success) {
       try {
