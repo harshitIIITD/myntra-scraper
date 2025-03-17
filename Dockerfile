@@ -48,20 +48,6 @@ RUN npm install
 # Copy project files
 COPY . .
 
-# Directly modify scraper.js to use the proper browser arguments instead of using a JS script
-RUN sed -i 's/await puppeteer\.launch({[^}]*})/await puppeteer.launch({\n            headless: true,\n            args: [\n                "--no-sandbox",\n                "--disable-setuid-sandbox",\n                "--disable-dev-shm-usage",\n                "--disable-accelerated-2d-canvas",\n                "--no-first-run",\n                "--no-zygote",\n                "--single-process",\n                "--disable-gpu"\n            ],\n            executablePath: "\/usr\/bin\/chromium"\n        })/g' scraper.js
-
-# Create health check endpoint in server.js directly without using a JS script
-RUN grep -q "/health" server.js || sed -i '/app\.listen(/i \
-// Health check endpoint\
-app.get("/health", (req, res) => {\
-  res.status(200).json({\
-    status: "ok",\
-    timestamp: new Date().toISOString(),\
-    uptime: process.uptime()\
-  });\
-});\
-' server.js
 
 # Expose the port that your app runs on
 EXPOSE 3001
@@ -74,18 +60,6 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 ENV NODE_OPTIONS=--max-old-space-size=4096
 ENV PUPPETEER_TIMEOUT=120000
 
-# Create additional script to fix timeouts
-RUN echo "console.log('Updating timeout values in scraper.js and server.js...');\n\
-const fs = require('fs');\n\
-let serverContent = fs.readFileSync('server.js', 'utf8');\n\
-serverContent = serverContent.replace(/setTimeout\\(\\(\\) => reject\\(new Error\\('Request timeout after \\d+s'\\)\\), \\d+\\)/g, \
-  'setTimeout(() => reject(new Error(\"Request timeout after 120s\")), 120000)');\n\
-fs.writeFileSync('server.js', serverContent);\n\
-\n\
-let scraperContent = fs.readFileSync('scraper.js', 'utf8');\n\
-scraperContent = scraperContent.replace(/timeout: \\d+/g, 'timeout: 120000');\n\
-fs.writeFileSync('scraper.js', scraperContent);\n\
-console.log('Timeout values updated!');" > /app/update-timeouts.js && node /app/update-timeouts.js
 
 # Start the server
 CMD ["node", "server.js"]
