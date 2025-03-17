@@ -61,17 +61,29 @@ let browser;
 
 async function initBrowser() {
   if (!browser) {
-    browser = await puppeteer.launch({
+    const options = {
       headless: "new",
       args: [
-        '--no-sandbox', 
+        '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=1920,1080'
+        '--disable-dev-shm-usage', // Important for Docker/Render
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
       ],
       defaultViewport: { width: 1920, height: 1080 }
-    });
+    };
+    
+    // Add specific Chrome path for Linux environments
+    if (process.platform === 'linux') {
+      options.executablePath = '/usr/bin/chromium-browser';
+    }
+    
+    browser = await puppeteer.launch(options);
   }
   return browser;
 }

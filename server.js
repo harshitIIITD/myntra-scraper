@@ -12,6 +12,9 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 
+// Add to the top of server.js after your imports
+const { browser } = require('./scraper');
+
 // Ensure price-history directory exists
 const priceHistoryDir = path.join(__dirname, 'price-history');
 if (!fs.existsSync(priceHistoryDir)) {
@@ -658,4 +661,17 @@ async function scrapeMyntraProductWithHistory(url) {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Visit http://localhost:${PORT} to test the scraper`);
+});
+
+// Add this cleanup logic at the end of server.js
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, closing browser and exiting...');
+  if (browser) await browser.close();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing browser and exiting...');
+  if (browser) await browser.close();
+  process.exit(0);
 });
