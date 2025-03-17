@@ -60,30 +60,42 @@ async function processQueue() {
 let browser;
 
 async function initBrowser() {
-  if (!browser) {
-    const options = {
-      headless: "new",
+  if (browser && browser.process() != null) {
+    try {
+      return browser;
+    } catch (e) {
+      console.log('Existing browser disconnected, launching new instance');
+    }
+  }
+  
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-dev-shm-usage', // Important for Docker/Render
+        '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
         '--single-process',
         '--disable-gpu'
       ],
-      defaultViewport: { width: 1920, height: 1080 }
-    };
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
+    });
     
-    // Always use this path on Render
-    options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser';
+    // Auto-restart browser if it crashes
+    browser.on('disconnected', () => {
+      console.log('Browser disconnected. Restarting...');
+      browser = null;
+      // Don't immediately restart - next getPage call will restart
+    });
     
-    browser = await puppeteer.launch(options);
+    return browser;
+  } catch (error) {
+    console.error('Failed to launch browser:', error);
+    throw error;
   }
-  return browser;
 }
 
 let browserPagePool = [];
