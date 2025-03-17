@@ -71,7 +71,7 @@ async function initBrowser() {
   try {
     console.log('Launching new browser instance with optimized settings for containerized environment');
     browser = await puppeteer.launch({
-      headless: "new", // Use new headless mode for better performance
+      headless: "new",
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -82,16 +82,17 @@ async function initBrowser() {
         '--single-process',
         '--disable-gpu',
         '--disable-extensions',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
+        '--window-size=1920,1080', // Use larger window size
         '--disable-infobars',
         '--window-position=0,0',
-        '--ignore-certifcate-errors',
-        '--ignore-certifcate-errors-spki-list',
+        '--ignore-certificate-errors', // Fixed typo in certificate
+        '--ignore-certificate-errors-spki-list',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-web-security',
         '--mute-audio'
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-      timeout: 0 // Disable Puppeteer's own timeout
+      timeout: 0
     });
     
     // Handle browser disconnection
@@ -129,19 +130,33 @@ async function getPage() {
   // Set page timeout to 0 (no timeout)
   page.setDefaultTimeout(0);
   
-  // Set viewport to a mobile device for faster loading
-  await page.setViewport({ width: 375, height: 667, isMobile: true });
+  // Rotate between desktop and mobile user agents
+  const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1'
+  ];
   
-  // Set a mobile user agent
-  await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1');
+  const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+  await page.setUserAgent(randomUserAgent);
   
-  // Block ALL resources except document and stylesheet
+  // Set viewport - alternate between mobile and desktop
+  if (randomUserAgent.includes('iPhone') || randomUserAgent.includes('Mobile')) {
+    await page.setViewport({ width: 375, height: 667, isMobile: true });
+  } else {
+    await page.setViewport({ width: 1280, height: 800, isMobile: false });
+  }
+  
+  // Only block image and video resources to speed up loading but allow CSS and scripts to execute properly
   await page.setRequestInterception(true);
   page.on('request', (request) => {
-    if (request.resourceType() === 'document' || request.resourceType() === 'stylesheet') {
-      request.continue();
-    } else {
+    if (request.resourceType() === 'image' || request.resourceType() === 'media' || 
+        request.resourceType() === 'font' || request.url().includes('analytics') || 
+        request.url().includes('tracker')) {
       request.abort();
+    } else {
+      request.continue();
     }
   });
 
@@ -156,6 +171,7 @@ async function getPage() {
   
   return page;
 }
+
 
 function releasePage(page) {
   if (browserPagePool.length < MAX_PAGES) {
@@ -257,89 +273,159 @@ async function regenerateCombinedJSON() {
   return generateCombinedProductsJSON();
 }
 
-// Update the actualScrapeFunction to better handle Myntra's specific structure and network issues
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
     let page = null;
-    let retries = 3; // Add retry mechanism
+    let retries = 4; // Increase retries
     
     while (retries > 0) {
       try {
-        console.log(`Attempting to scrape (retry ${4-retries}/3): ${url}`);
+        console.log(`Attempting to scrape (retry ${5-retries}/4): ${url}`);
         
         page = await getPage();
-
-        // Disable JavaScript for faster loading and to bypass some protections
-        await page.setJavaScriptEnabled(false);
         
-        console.log("JavaScript disabled for faster loading");
+        // Random sleep before navigation to avoid detection patterns
+        const randomSleep = Math.floor(Math.random() * 1000) + 500;
+        await new Promise(r => setTimeout(r, randomSleep));
         
-        // Set a more aggressive timeout for navigation
-        const navigationPromise = page.goto(url, { 
-          waitUntil: 'domcontentloaded', // Use domcontentloaded instead of networkidle2
-          timeout: 30000  // 30 second timeout just for navigation
+        // First try with JavaScript enabled (to handle dynamic websites better)
+        await page.setJavaScriptEnabled(true);
+        
+        console.log("Navigating with JavaScript enabled");
+        
+        // Add some randomness to navigation options
+        const waitUntilOptions = ['domcontentloaded', 'networkidle2'];
+        const selectedWaitOption = waitUntilOptions[Math.floor(Math.random() * waitUntilOptions.length)];
+        
+        console.log(`Navigation started with ${selectedWaitOption} wait option...`);
+        
+        // Navigate with a timeout
+        const response = await page.goto(url, { 
+          waitUntil: selectedWaitOption, 
+          timeout: 40000 // 40 second timeout
         });
-
-        console.log("Navigation started...");
         
-        // Create a timeout safety net
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Navigation timeout exceeded')), 30000)
-        );
-
-        // Race the navigation against our own timeout
-        await Promise.race([navigationPromise, timeoutPromise]);
+        if (!response) {
+          throw new Error('No response received from page');
+        }
         
-        console.log("Page loaded, extracting data directly without waiting for selectors");
+        // Check status code
+        if (response.status() >= 400) {
+          throw new Error(`Received HTTP ${response.status()} status code`);
+        }
         
-        // Extract the product data immediately without waiting for selectors
+        // Wait a bit for JavaScript to execute and check for captchas/blocks
+        await page.waitForTimeout(2000);
+        
+        // Simulate human-like behavior
+        // Random scrolling
+        await page.evaluate(() => {
+          const randomScrolls = Math.floor(Math.random() * 4) + 2;
+          const scrollHeight = document.body.scrollHeight;
+          
+          for (let i = 0; i < randomScrolls; i++) {
+            const position = Math.floor((i + 1) * scrollHeight / (randomScrolls + 1));
+            window.scrollTo(0, position);
+          }
+        });
+        
+        // Wait a moment
+        await page.waitForTimeout(1000);
+        
+        // Check if page contains content
+        const pageContent = await page.content();
+        if (!pageContent.includes('Myntra') && !pageContent.includes('product')) {
+          throw new Error('Page does not contain expected content');
+        }
+        
+        // Check for common bot detection patterns
+        const title = await page.title();
+        if (title.includes('Robot') || title.includes('Captcha') || title.includes('Blocked')) {
+          throw new Error('Bot protection detected in page title');
+        }
+        
+        console.log("Extracting product data");
+        
+        // Try to extract the product data
         const productData = await page.evaluate(() => {
-          // Simple data extraction function that doesn't rely on complex selectors
+          // Helper function
           const getTextContent = (selector) => {
             const el = document.querySelector(selector);
             return el ? el.textContent.trim() : '';
           };
           
-          // Extract basic product info
+          // More comprehensive selector list
           const data = {
-            title: document.title.replace(' | Myntra', '').trim() || "Unknown Product",
+            title: document.title.replace(' | Myntra', '').trim() || 
+                   getTextContent('.pdp-name') || 
+                   getTextContent('h1.title') || 
+                   "Unknown Product",
             brand: getTextContent('.pdp-title .pdp-name') || 
-                  getTextContent('.brand-name') || 
-                  getTextContent('h1.brand') || "Unknown Brand",
+                   getTextContent('.brand-name') || 
+                   getTextContent('h1.brand') ||
+                   getTextContent('.pdp-title') ||
+                   "Unknown Brand",
             price: getTextContent('.pdp-price') || 
-                  getTextContent('.pdp-mrp') || 
-                  getTextContent('.price-container') || "N/A",
+                   getTextContent('.pdp-discount-container') || 
+                   getTextContent('.pdp-mrp') || 
+                   getTextContent('.price-container') || 
+                   getTextContent('.price') || "N/A",
             description: getTextContent('.pdp-product-description') || 
-                        getTextContent('.pdp-sizeFitDesc') || "",
+                         getTextContent('.pdp-product-description-content') || 
+                         getTextContent('.pdp-sizeFitDesc') || "",
             images: [],
             availability: "in_stock" // Default to in_stock
           };
           
-          // Simple image extraction
-          const imgElements = document.querySelectorAll('img');
-          if (imgElements && imgElements.length > 0) {
-            data.images = Array.from(imgElements)
-              .filter(img => img.src && img.src.includes('myntra.com'))
-              .map(img => img.src)
-              .slice(0, 5); // Limit to first 5 images
+          // Get images - try different selector patterns
+          const selectors = ['img.image-grid-image', 'img.image-grid-imageV2', '.image-grid-container img', '.common-image-container img'];
+          for (const selector of selectors) {
+            const imgElements = document.querySelectorAll(selector);
+            if (imgElements && imgElements.length > 0) {
+              data.images = Array.from(imgElements)
+                .map(img => img.src)
+                .filter(src => src && src.includes('myntra.com'))
+                .slice(0, 5);
+              break;
+            }
           }
           
-          // Simple availability check
+          // If no images found with specific selectors, try generic img tags
+          if (data.images.length === 0) {
+            const imgElements = document.querySelectorAll('img');
+            if (imgElements && imgElements.length > 0) {
+              data.images = Array.from(imgElements)
+                .filter(img => img.src && img.src.includes('myntra.com') && img.width > 100)
+                .map(img => img.src)
+                .slice(0, 5);
+            }
+          }
+          
+          // Extract available sizes
+          data.availableSizes = [];
+          const sizeElements = document.querySelectorAll('.size-buttons-size-button:not(.size-buttons-size-button-disabled), .size-buttons-unified-size:not(.size-buttons-out-of-stock)');
+          if (sizeElements && sizeElements.length > 0) {
+            data.availableSizes = Array.from(sizeElements)
+              .map(el => el.textContent.trim())
+              .filter(size => size);
+          }
+          
+          // Comprehensive availability check
           if (document.body.textContent.includes('OUT OF STOCK') || 
-              document.body.textContent.includes('SOLD OUT')) {
+              document.body.textContent.includes('SOLD OUT') ||
+              document.body.textContent.includes('out of stock') ||
+              document.body.textContent.includes('sold out')) {
             data.availability = 'out_of_stock';
           }
           
           return data;
         });
         
-        console.log('Successfully extracted basic product data');
-        
-        // Re-enable JavaScript for future page uses
-        await page.setJavaScriptEnabled(true);
+        console.log('Successfully extracted product data');
         
         // Release the page back to the pool
-        if (page) releasePage(page);
+        releasePage(page);
+        page = null;
         
         // Return success
         resolve({
@@ -350,14 +436,13 @@ function actualScrapeFunction(url) {
         // Exit retry loop on success
         break;
       } catch (error) {
-        console.error(`Error scraping attempt ${4-retries}/3:`, error.message);
+        console.error(`Error scraping attempt ${5-retries}/4:`, error.message);
         
-        // Release the page on error
+        // Clean up page on error
         if (page) {
           try {
-            // Make sure to re-enable JavaScript before returning page to pool
-            await page.setJavaScriptEnabled(true).catch(() => {});
             await page.close().catch(() => {});
+            page = null;
           } catch (e) {
             console.error('Error closing page:', e);
           }
@@ -365,10 +450,11 @@ function actualScrapeFunction(url) {
         
         retries--;
         
-        // If we have retries left, wait before trying again
+        // If we have retries left, wait before trying again with increasing delays
         if (retries > 0) {
-          console.log(`Retrying in 3 seconds... (${retries} attempts left)`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          const waitTime = (5 - retries) * 2000; // Progressive backoff
+          console.log(`Retrying in ${waitTime/1000} seconds... (${retries} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
         } else {
           // All retries failed, return error response
           resolve({
@@ -381,6 +467,7 @@ function actualScrapeFunction(url) {
     }
   });
 }
+
 
 // Replace your existing checkAvailability function with this improved version
 

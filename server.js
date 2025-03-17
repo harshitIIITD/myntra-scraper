@@ -106,10 +106,14 @@ app.post('/api/scrape', async (req, res) => {
   try {
     console.log(`Received POST request to scrape ${website} URL: ${url}`);
     
-    // Increase the timeout to 180 seconds (3 minutes)
+    // Set longer timeout (4 minutes)
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout after 180s')), 180000)
+      setTimeout(() => reject(new Error('Request timeout after 240s')), 240000)
     );
+    
+    // Explicitly increase Node.js server timeout
+    req.socket.setTimeout(250000);
+    res.setTimeout(250000);
     
     // Choose the appropriate scraping function based on website
     let scrapingFunction;
@@ -126,20 +130,37 @@ app.post('/api/scrape', async (req, res) => {
         scrapingFunction = scrapeMyntraProductWithHistory;
     }
     
-    // Race against timeout with a longer timeout
+    // Add progress tracking
+    let scrapeTimer = setTimeout(() => {
+      console.log('Scraping in progress - 60 seconds elapsed...');
+    }, 60000);
+    
+    // Race against timeout
     const result = await Promise.race([
       scrapingFunction(url),
       timeoutPromise
-    ]);
+    ]).finally(() => {
+      clearTimeout(scrapeTimer);
+    });
+    
+    // Ensure a valid response even if result is somehow undefined
+    if (!result) {
+      throw new Error('Scraping completed but returned no data');
+    }
     
     return res.json(result);
   } catch (error) {
     console.error('Error in API endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error while scraping',
-      details: error.message
-    });
+    // Check if headers have already been sent
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server error while scraping',
+        details: error.message || 'Unknown error'
+      });
+    } else {
+      console.error('Headers already sent, cannot send error response');
+    }
   }
 });
 
@@ -608,50 +629,67 @@ const originalScrapeMyntraProduct = scrapeMyntraProduct;
 
 // Instead of replacing the original function, create a wrapper function
 async function scrapeMyntraProductWithHistory(url) {
-  const result = await originalScrapeMyntraProduct(url);
-  
-  if (result.success) {
-    try {
-      // Extract product ID from URL
-      const urlSegments = url.split('/');
-      const productId = urlSegments[urlSegments.length - 2] || urlSegments[urlSegments.length - 1];
-      
-      // Ensure price history directory exists
-      const historyDir = path.join(__dirname, 'price-history');
-      if (!fs.existsSync(historyDir)) {
-        fs.mkdirSync(historyDir);
+  try {
+    console.log(`Starting scrape with history tracking for: ${url}`);
+    const result = await originalScrapeMyntraProduct(url);
+    
+    if (result && result.success) {
+      try {
+        // Extract product ID from URL
+        const urlSegments = url.split('/');
+        const productId = urlSegments[urlSegments.length - 2] || urlSegments[urlSegments.length - 1];
+        
+        // Ensure price history directory exists
+        const historyDir = path.join(__dirname, 'price-history');
+        if (!fs.existsSync(historyDir)) {
+          fs.mkdirSync(historyDir);
+        }
+        
+        // Path to history file
+        const historyPath = path.join(historyDir, `${productId}.json`);
+        
+        // Read existing history or create new array
+        let history = [];
+        if (fs.existsSync(historyPath)) {
+          history = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+        }
+        
+        // Add new price data point
+        history.push({
+          date: new Date().toISOString(),
+          price: result.data.price
+        });
+        
+        // Keep only last 30 data points to prevent file from growing too large
+        if (history.length > 30) {
+          history = history.slice(history.length - 30);
+        }
+        
+        // Save updated history
+        fs.writeFileSync(historyPath, JSON.stringify(history));
+        console.log(`Successfully updated price history for product ID: ${productId}`);
+        
+      } catch (error) {
+        console.error('Error updating price history:', error);
+        // Don't fail the main scrape if history update fails
       }
-      
-      // Path to history file
-      const historyPath = path.join(historyDir, `${productId}.json`);
-      
-      // Read existing history or create new array
-      let history = [];
-      if (fs.existsSync(historyPath)) {
-        history = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
-      }
-      
-      // Add new price data point
-      history.push({
-        date: new Date().toISOString(),
-        price: result.data.price
-      });
-      
-      // Keep only last 30 data points to prevent file from growing too large
-      if (history.length > 30) {
-        history = history.slice(history.length - 30);
-      }
-      
-      // Save updated history
-      fs.writeFileSync(historyPath, JSON.stringify(history));
-      
-    } catch (error) {
-      console.error('Error updating price history:', error);
-      // Don't fail the main scrape if history update fails
+    } else if (!result) {
+      return {
+        success: false,
+        error: 'Scraping function returned null or undefined result',
+        details: 'Internal server error'
+      };
     }
+    
+    return result;
+  } catch (error) {
+    console.error('Error in scrapeMyntraProductWithHistory wrapper:', error);
+    return {
+      success: false,
+      error: 'Failed to complete scraping operation',
+      details: error.message || 'Unknown error'
+    };
   }
-  
-  return result;
 }
 
 // Use the wrapper function directly in the routes instead of reassigning
@@ -682,5 +720,23 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
+  });
+});
+
+// Make sure the health check endpoint works properly
+app.get('/health', (req, res) => {
+  // Check memory usage
+  const memoryUsage = process.memoryUsage();
+  const memoryUsageMB = Math.round(memoryUsage.rss / 1024 / 1024);
+  
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: {
+      rss: `${memoryUsageMB}MB`,
+      heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+      heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`
+    }
   });
 });
