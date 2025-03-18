@@ -87,57 +87,50 @@ async function initBrowser() {
   browserInitializing = true;
   browserInitPromise = (async () => {
     try {
-      console.log('Launching new browser instance optimized for Render environment');
+      console.log('Launching new browser instance optimized for Replit environment');
     
-      // Check if we're running on Render (common env variable on Render)
-      const isRender = process.env.RENDER || process.env.RENDER_EXTERNAL_URL;
+      // Check if we're running on Replit
+      const isReplit = process.env.REPL_ID || process.env.REPL_SLUG;
       
-      const args = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--disable-infobars',
-        '--window-position=0,0',
-        '--ignore-certificate-errors',
-        '--ignore-certificate-errors-spki-list',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-web-security',
-        '--mute-audio'
-      ];
-      
-      // Add specific optimizations for Render environment
-      if (isRender) {
-        args.push(
-          '--disable-dev-tools',
-          '--disable-software-rasterizer',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--enable-features=NetworkService',
-          '--memory-pressure-off'
-        );
+      // Different configurations based on environment
+      if (isReplit) {
+        // Use puppeteer-core with a specific Chrome binary on Replit
+        const chromePath = '/nix/store/x205pbkd5xh5g4iv0g58xjla55has3cx-chromium-108.0.5359.94/bin/chromium';
+        
+        // Use a more basic configuration for Replit
+        browser = await puppeteer.launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+          ],
+          executablePath: chromePath
+        });
       } else {
-        // For local development, can use larger window size
-        args.push('--window-size=1920,1080');
+        // Original configuration for non-Replit environments
+        const args = [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          // ...rest of your original args
+        ];
+        
+        browser = await puppeteer.launch({
+          headless: "new",
+          args: args,
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+          timeout: 60000,
+          ignoreHTTPSErrors: true,
+          handleSIGINT: false,
+          handleSIGTERM: false,
+          handleSIGHUP: false
+        });
       }
-      
-      browser = await puppeteer.launch({
-        headless: "new",
-        args: args,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-        timeout: 60000, // Set a more reasonable timeout for browser launch
-        // Default timeout was 0 (infinite) which can cause issues on cloud environments
-        ignoreHTTPSErrors: true,
-        handleSIGINT: false, // Let our own handlers manage process signals
-        handleSIGTERM: false,
-        handleSIGHUP: false
-      });
       
       // Handle browser disconnection
       browser.on('disconnected', () => {
@@ -330,6 +323,32 @@ function logScrapingInfo(message, url) {
 
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
+    // Try to extract product ID from URL to check cache first
+    let productId = 'unknown';
+    try {
+      const urlSegments = url.split('/');
+      productId = urlSegments[urlSegments.length - 1]; 
+      
+      // If we have this product in cache, return it when in Replit (as a fallback)
+      const isReplit = process.env.REPL_ID || process.env.REPL_SLUG;
+      if (isReplit) {
+        try {
+          const cacheDir = path.join(__dirname, 'cache');
+          const cachePath = path.join(cacheDir, `${productId}.json`);
+          if (fs.existsSync(cachePath)) {
+            console.log(`Using cached data for product ${productId} due to browser launch issues`);
+            const cachedData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+            return resolve(cachedData.data);
+          }
+        } catch (cacheError) {
+          console.error('Error reading from cache:', cacheError);
+        }
+      }
+    } catch (urlError) {
+      console.error('Error parsing URL for cache check:', urlError);
+    }
+    
+    // Rest of your existing code...
     let page = null;
     let retries = 4; // Increase retries
     

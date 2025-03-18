@@ -1,0 +1,9 @@
+language = "nodejs"
+run = "npm start"
+entrypoint = "server.js"
+
+[nix]
+channel = "stable-22_11"
+
+[env]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
