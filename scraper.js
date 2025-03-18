@@ -87,19 +87,27 @@ async function initBrowser() {
   browserInitializing = true;
   browserInitPromise = (async () => {
     try {
-      console.log('Launching new browser instance optimized for Replit environment');
+      console.log('Launching new browser instance...');
     
       // Check if we're running on Replit
-      const isReplit = process.env.REPL_ID || process.env.REPL_SLUG;
+      const isReplit = process.env.REPL_ID || process.env.REPL_SLUG || process.env.REPLIT_ENV === 'true';
       
-      // Different configurations based on environment
       if (isReplit) {
-        // Use puppeteer-core with a specific Chrome binary on Replit
-        const chromePath = '/nix/store/x205pbkd5xh5g4iv0g58xjla55has3cx-chromium-108.0.5359.94/bin/chromium';
+        console.log('Detected Replit environment, using special configuration');
         
-        // Use a more basic configuration for Replit
+        // Get the path to Chromium from environment or use the default Replit path
+        let chromePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+        if (!chromePath) {
+          chromePath = '/nix/store/x205pbkd5xh5g4iv0g58xjla55has3cx-chromium-108.0.5359.94/bin/chromium';
+          console.log(`No executable path specified, using default: ${chromePath}`);
+        }
+        
+        console.log(`Launching browser with executable path: ${chromePath}`);
+        
+        // Special configuration for Replit
         browser = await puppeteer.launch({
           headless: true,
+          executablePath: chromePath,
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -108,16 +116,19 @@ async function initBrowser() {
             '--no-first-run',
             '--no-zygote',
             '--single-process',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-features=site-per-process'
           ],
-          executablePath: chromePath
+          ignoreHTTPSErrors: true
         });
       } else {
-        // Original configuration for non-Replit environments
+        // Configuration for non-Replit environments
         const args = [
           '--no-sandbox',
           '--disable-setuid-sandbox',
-          // ...rest of your original args
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas'
         ];
         
         browser = await puppeteer.launch({
@@ -144,6 +155,13 @@ async function initBrowser() {
     } catch (error) {
       browserInitializing = false;
       console.error('Failed to launch browser:', error);
+      
+      // Check if this is a library dependency error
+      if (error.message && error.message.includes('error while loading shared libraries')) {
+        console.error('Missing system dependencies! Please follow the troubleshooting guide at https://pptr.dev/troubleshooting');
+        console.error('For Replit users: This error often occurs due to missing libraries. Try using the HTTP fallback method instead.');
+      }
+      
       throw error;
     }
   })();
@@ -321,6 +339,14 @@ function logScrapingInfo(message, url) {
   console.log(`[${new Date().toISOString()}] [Scraping] ${message} - ${url}`);
 }
 
+// Add this at the top with your other requires
+let httpScraper;
+try {
+  httpScraper = require('./httpScraper');
+} catch (e) {
+  console.log('HTTP scraper not available, will not use fallback');
+}
+
 function actualScrapeFunction(url) {
   return new Promise(async (resolve, reject) => {
     // Try to extract product ID from URL to check cache first
@@ -330,7 +356,7 @@ function actualScrapeFunction(url) {
       productId = urlSegments[urlSegments.length - 1]; 
       
       // If we have this product in cache, return it when in Replit (as a fallback)
-      const isReplit = process.env.REPL_ID || process.env.REPL_SLUG;
+      const isReplit = process.env.REPL_ID || process.env.REPL_SLUG || process.env.REPLIT_ENV === 'true';
       if (isReplit) {
         try {
           const cacheDir = path.join(__dirname, 'cache');
@@ -516,7 +542,19 @@ function actualScrapeFunction(url) {
           logScrapingInfo(`Retrying in ${waitTime/1000} seconds (${retries} attempts left)`, url);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         } else {
-          // All retries failed, return error response
+          // All retries failed, try HTTP fallback if available
+          const isReplit = process.env.REPL_ID || process.env.REPL_SLUG || process.env.REPLIT_ENV === 'true';
+          if (isReplit && httpScraper) {
+            logScrapingInfo("Browser-based scraping failed, trying HTTP fallback method", url);
+            try {
+              const httpResult = await httpScraper.scrapeWithHttp(url);
+              return resolve(httpResult);
+            } catch (httpError) {
+              console.error('HTTP fallback failed:', httpError);
+            }
+          }
+          
+          // Return error response if everything failed
           resolve({
             success: false,
             error: 'Failed to scrape product data after multiple attempts',
